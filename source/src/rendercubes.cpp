@@ -86,7 +86,8 @@ void renderstripssky()
 
 void renderstrips()
 {
-    bool shader = beginworldshader();
+    extern bool beginlightgridshader();
+    bool shader = beginlightgridshader() || beginworldshader();
     loopj(renderedtexs)
     {
         stripbatch &sb = stripbatches[j];

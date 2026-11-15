@@ -172,6 +172,8 @@ void fullbrightlight(int level)
 
     loopi(mipsize) world[i].r = world[i].g = world[i].b = level;
     lastcalclight = totalmillis;
+    extern void lightgridchanged(int x, int y, int xs, int ys);
+    lightgridchanged(0, 0, ssize, ssize);
 }
 
 VARF(ambient, 0, 0, 0xFFFFFF, if(!noteditmode("ambient")) { hdr.ambient = ambient; calclight(); unsavededits++;});
@@ -214,6 +216,8 @@ void calclight()
     postlightarea(bb);
     setvar("fullbright", 0);
     lastcalclight = totalmillis;
+    extern void lightgridchanged(int x, int y, int xs, int ys);
+    lightgridchanged(0, 0, ssize, ssize);
 }
 
 struct dlight

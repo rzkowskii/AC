@@ -151,6 +151,34 @@ static const char *worldfs =
     "    gl_FragColor = vec4(mix(gl_Fog.color.rgb, c.rgb, f), c.a);\n"
     "}\n";
 
+// "lightgrid 1": the world's light is sampled per pixel from a texture holding each cube corner's light (texel (x, y) =
+// the light of world vertex (x, y)), with bilinear filtering. The vertex colours hold the same values, but are blended
+// across each triangle (Gouraud), which shows the triangle diagonals and blurs or merges detail across long strips.
+static const char *lightgridvs =
+    "#version 120\n"
+    "uniform float invsize;\n"
+    "varying vec2 lightpos;\n"
+    "void main()\n"
+    "{\n"
+    "    gl_Position = ftransform();\n"
+    "    gl_TexCoord[0] = gl_TextureMatrix[0] * gl_MultiTexCoord0;\n"
+    "    lightpos = (gl_Vertex.xy + 0.5) * invsize;\n"
+    "    gl_FogFragCoord = length((gl_ModelViewMatrix * gl_Vertex).xyz);\n"
+    "}\n";
+
+static const char *lightgridfs =
+    "#version 120\n"
+    "uniform sampler2D tex, lightgrid;\n"
+    "uniform float fogon;\n"
+    "varying vec2 lightpos;\n"
+    "void main()\n"
+    "{\n"
+    "    vec4 c = texture2D(tex, gl_TexCoord[0].xy);\n"
+    "    c.rgb = min(c.rgb * texture2D(lightgrid, lightpos).rgb * 2.0, 1.0);\n"
+    "    float f = fogon > 0.5 ? clamp((gl_Fog.end - gl_FogFragCoord) * gl_Fog.scale, 0.0, 1.0) : 1.0;\n"
+    "    gl_FragColor = vec4(mix(gl_Fog.color.rgb, c.rgb, f), c.a);\n"
+    "}\n";
+
 struct postprogram
 {
     const char *name, *fs, *vs;
@@ -159,7 +187,8 @@ struct postprogram
     bool failed;
 };
 static postprogram gammaprog = { "gamma", gammafs, NULL, 0, -1, -1, false }, fxaaprog = { "fxaa", fxaafs, NULL, 0, -1, -1, false },
-                   worldprog = { "world", worldfs, worldvs, 0, -1, -1, false };
+                   worldprog = { "world", worldfs, worldvs, 0, -1, -1, false },
+                   lightgridprog = { "lightgrid", lightgridfs, lightgridvs, 0, -1, -1, false };
 
 static bool compileprogram(postprogram &p);
 
@@ -215,7 +244,7 @@ static bool compileprogram(postprogram &p)
         return false;
     }
     p.texloc = glGetUniformLocation_(p.program, "tex");
-    p.paramloc = glGetUniformLocation_(p.program, p.fs == gammafs ? "exponent" : (p.fs == worldfs ? "fogon" : "texel"));
+    p.paramloc = glGetUniformLocation_(p.program, p.fs == gammafs ? "exponent" : (p.fs == worldfs || p.fs == lightgridfs ? "fogon" : "texel"));
     return true;
 }
 
@@ -330,6 +359,84 @@ bool beginworldshader()
 
 void endworldshader() { glUseProgram_(0); }
 
+// --- light grid texture (lightgrid 1)
+
+VARP(lightgrid, 0, 0, 1);
+static GLuint lightgridtex = 0;
+static int lightgridsize = 0;
+static sqr *lightgridworld = NULL;
+static int dirtyx1 = 0, dirtyy1 = 0, dirtyx2 = -1, dirtyy2 = -1; // changed corners since the last upload (inclusive)
+
+void lightgridchanged(int x, int y, int xs, int ys) // the light (or anything else) of these world cubes has changed
+{
+    if(!lightgridtex) return;
+    int x2 = x + xs, y2 = y + ys; // a cube's change can affect the mip average of its neighbour: one extra row/column
+    if(dirtyx2 < dirtyx1) { dirtyx1 = x; dirtyy1 = y; dirtyx2 = x2; dirtyy2 = y2; }
+    else { dirtyx1 = min(dirtyx1, x); dirtyy1 = min(dirtyy1, y); dirtyx2 = max(dirtyx2, x2); dirtyy2 = max(dirtyy2, y2); }
+}
+
+static void uploadlightgrid(int x1, int y1, int x2, int y2)
+{
+    x1 = max(x1, 0); y1 = max(y1, 0); x2 = min(x2, ssize - 1); y2 = min(y2, ssize - 1);
+    if(x2 < x1 || y2 < y1) return;
+    int w = x2 - x1 + 1, h = y2 - y1 + 1;
+    static vector<uchar> buf;
+    buf.setsize(0);
+    uchar *dst = buf.pad(w*h*3);
+    for(int y = y1; y <= y2; y++)
+    {
+        const sqr *s = S(x1, y);
+        loopi(w) { *dst++ = s->r; *dst++ = s->g; *dst++ = s->b; s++; }
+    }
+    glBindTexture(GL_TEXTURE_2D, lightgridtex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x1, y1, w, h, GL_RGB, GL_UNSIGNED_BYTE, buf.getbuf());
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+}
+
+static bool updatelightgrid()
+{
+    if(!world || ssize <= 0) return false;
+    if(!lightgridtex || lightgridsize != ssize || lightgridworld != world)
+    {
+        if(!lightgridtex) glGenTextures(1, &lightgridtex);
+        glBindTexture(GL_TEXTURE_2D, lightgridtex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, ssize, ssize, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+        lightgridsize = ssize;
+        lightgridworld = world;
+        dirtyx1 = dirtyy1 = 0; dirtyx2 = dirtyy2 = ssize - 1;
+    }
+    if(dirtyx2 >= dirtyx1)
+    {
+        uploadlightgrid(dirtyx1, dirtyy1, dirtyx2, dirtyy2);
+        dirtyx2 = dirtyx1 - 1;
+    }
+    return true;
+}
+
+// binds the light grid shader for the world's strips (instead of beginworldshader()); call endworldshader() afterwards
+bool beginlightgridshader()
+{
+    extern bool tmuismodulate2x(int n);
+    extern bool showmipstats;
+    if(!lightgrid || showmipstats || !hasMT || !glActiveTexture_ || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D)) return false;
+    if(!loadprogram(lightgridprog)) return false;
+    glActiveTexture_(GL_TEXTURE1_ARB);
+    bool ok = updatelightgrid();
+    glActiveTexture_(GL_TEXTURE0_ARB);
+    if(!ok) return false;
+    glUseProgram_(lightgridprog.program);
+    glUniform1i_(lightgridprog.texloc, 0);
+    glUniform1i_(glGetUniformLocation_(lightgridprog.program, "lightgrid"), 1);
+    glUniform1f_(glGetUniformLocation_(lightgridprog.program, "invsize"), 1.0f / ssize);
+    glUniform1f_(lightgridprog.paramloc, glIsEnabled(GL_FOG) ? 1.0f : 0.0f);
+    return true;
+}
+
 
 void cleanuppostfx() // the GL context is about to be destroyed (resetgl)
 {
@@ -340,7 +447,12 @@ void cleanuppostfx() // the GL context is about to be destroyed (resetgl)
     if(gammaprog.program) glDeleteProgram_(gammaprog.program);
     if(fxaaprog.program) glDeleteProgram_(fxaaprog.program);
     if(worldprog.program) glDeleteProgram_(worldprog.program);
-    gammaprog.program = fxaaprog.program = worldprog.program = 0;
-    gammaprog.failed = fxaaprog.failed = worldprog.failed = false;
+    if(lightgridprog.program) glDeleteProgram_(lightgridprog.program);
+    gammaprog.program = fxaaprog.program = worldprog.program = lightgridprog.program = 0;
+    gammaprog.failed = fxaaprog.failed = worldprog.failed = lightgridprog.failed = false;
+    if(lightgridtex) glDeleteTextures(1, &lightgridtex);
+    lightgridtex = 0;
+    lightgridsize = 0;
+    lightgridworld = NULL;
     glslchecked = false;
 }

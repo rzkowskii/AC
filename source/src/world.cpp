@@ -18,6 +18,7 @@ _mapconfigdata mapconfigdata;
 
 void remip(const block &b, int level)
 {
+    if(level == 0) { extern void lightgridchanged(int x, int y, int xs, int ys); lightgridchanged(b.x, b.y, b.xs, b.ys); }
     if(level>=SMALLEST_FACTOR) return;
     int lighterr = lighterror*3;
     sqr *w = wmip[level];
