@@ -39,7 +39,7 @@ ifneq (,$(findstring clang,$(CXX)))
 else
 	CXXFLAGS= -O3 -fomit-frame-pointer
 	override CXXFLAGS+= -Wall -fsigned-char -ffast-math -rdynamic -Wno-format-zero-length
-	ifeq "$(shell expr 'gcc -dumpversion' \>= 8)" "1"
+	ifeq "$(shell expr $$($(CXX) -dumpversion | cut -d. -f1) \>= 8)" "1"
 		override CXXFLAGS+= -Wno-stringop-truncation
 	endif
 endif

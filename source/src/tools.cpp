@@ -728,6 +728,7 @@ bool glmatrixf::invert(const glmatrixf &m, float mindet)
 #endif
 
 static int sl_sem_errorcountdummy = 0;
+bool sl_skipsemaphoredestroy = false;
 
 #ifdef AC_USE_SDL_THREADS
 sl_semaphore::sl_semaphore(int init, int *ecnt)
@@ -739,7 +740,7 @@ sl_semaphore::sl_semaphore(int init, int *ecnt)
 
 sl_semaphore::~sl_semaphore()
 {
-    if(data) SDL_DestroySemaphore((SDL_sem *) data);
+    if(data && !sl_skipsemaphoredestroy) SDL_DestroySemaphore((SDL_sem *) data);
 }
 
 void sl_semaphore::wait()

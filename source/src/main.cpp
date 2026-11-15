@@ -27,6 +27,7 @@ void cleanup(char *msg)         // single program exit point;
         }
     }
     SDL_Quit();
+    sl_skipsemaphoredestroy = true; // the process is about to exit: don't destroy static SDL semaphores after SDL_Quit
 }
 
 VAR(resetcfg, 0, 0, 1);
@@ -794,7 +795,7 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
     inputgrab(grabinput = fullscreen ? true : false);
 
     useddepthbits = config&1 ? depthbits : 0;
-    usedfsaa = config&2 ? fsaa : 0;
+    usedfsaa = config&4 ? fsaa : 0; // bit 2 is multisampling (bit 1 is stencil)
 }
 
 extern int hirestextures;

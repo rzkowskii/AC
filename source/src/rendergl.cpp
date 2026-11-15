@@ -76,7 +76,13 @@ void gl_checkextensions()
         glMultiDrawElements_ = (PFNGLMULTIDRAWELEMENTSEXTPROC)getprocaddress("glMultiDrawElementsEXT");
         hasMDA = true;
 
-        if(strstr(vendor, "ATI") || strstr(renderer, "Mesa") || strstr(version, "Mesa")) ati_mda_bug = 1;
+        // glMultiDrawArrays was broken in old ATI drivers and in early Mesa releases. Modern Mesa (radeonsi, iris, nouveau,
+        // asahi, zink, llvmpipe, ...) handles it fine, and the workaround costs one glDrawArrays call per world strip,
+        // so it's only applied to Mesa older than 10.0 (2013) or when the Mesa version can't be determined.
+        const char *mesa = strstr(version, "Mesa ");
+        bool oldmesa = mesa ? atoi(mesa + 5) < 10 : strstr(renderer, "Mesa") != NULL;
+        if(strstr(vendor, "ATI") || oldmesa) ati_mda_bug = 1;
+        if(ati_mda_bug) conoutf("WARNING: glMultiDrawArrays disabled for this driver (ati_mda_bug 1)");
     }
 
     if(hasext(exts, "GL_EXT_draw_range_elements"))
