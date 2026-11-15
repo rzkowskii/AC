@@ -12,13 +12,15 @@
 // the next frame can read the target without waiting for the rest of the frame), and draws the main pass, which is a
 // single render pass into an offscreen target that is finally copied to the swapchain.
 //
-// Not ported yet (stage 1): multitexturing and the other texture combiners (particles, water), stencil, render-to-
-// texture (reflections, minimap), line width and polygon mode (editor), the post-processing shaders. The renderer only
-// uses these where gfx_legacygl() is true.
+// Copies of the frame into textures (water reflection and refraction, minimap) end the current pass and are blitted
+// after it; FXAA and gamma are passes of their own (postpass()). Stencil (stencil shadows) needs stencilbits 8 at start.
+//
+// Not ported yet: line width and polygon mode (the editor's overlay). The renderer only uses these, and display lists,
+// where gfx_legacygl() is true.
 
 #include "cube.h"
 
-VAR(gpudebug, 0, 0, 1); // log every pipeline the GPU backend creates
+VAR(gpudebug, 0, 0, 2); // 1: log every pipeline the GPU backend creates; 2: and what every 500th frame contains
 extern int benchnopresent;
 static void setframesinflight();
 VARF(gpuframes, 1, 2, 3, setframesinflight()); // frames the GPU backend lets the CPU queue ahead of the GPU
@@ -46,7 +48,20 @@ struct gmat
 static const char *mslcommon =
     "#include <metal_stdlib>\n"
     "using namespace metal;\n"
+    // texture coordinates: with TEXMAT (a texture matrix, which only the water's projective reflection lookup uses) all
+    // four go through the matrices, are interpolated and divided per fragment; otherwise two, sampled directly (no
+    // dependent texture read, and smaller uniforms without the two texture matrices)
+    "#if TEXMAT\n"
+    "struct VSU { float4x4 mvp; float4x4 mv; float4 color; float4x4 tex0; float4x4 tex1; };\n"
+    "#define TCV float4\n"
+    "#define TCNONE float4(0.0, 0.0, 0.0, 1.0)\n"
+    "#define TCIN(t) ((t).xy / (t).w)\n"
+    "#else\n"
     "struct VSU { float4x4 mvp; float4x4 mv; float4 color; };\n"
+    "#define TCV float2\n"
+    "#define TCNONE float2(0.0)\n"
+    "#define TCIN(t) (t)\n"
+    "#endif\n"
     // a texture unit's combiner (texture.cpp, encodetmu()): rgb/alpha = (function, source 0, 1, 2), rgbop/alphaop = (operand 0, 1, 2, scale)
     "struct Unit { int4 rgb; int4 rgbop; int4 alpha; int4 alphaop; float4 k; };\n"
     // fog: end, 1/(end-start), on; params: -, alpha test reference (<0: off); units: which texture units are on
@@ -55,16 +70,16 @@ static const char *mslcommon =
     "{\n"
     "    float3 pos [[attribute(0)]];\n"
     "#if HAS_TC\n"
-    "    float2 tc [[attribute(1)]];\n"
+    "    TCV tc [[attribute(1)]];\n"   // (TEXMAT, 2 or 3 components in the vertex: z = 0, w = 1 are filled in)
     "#endif\n"
     "#if HAS_COLOR\n"
     "    float4 color [[attribute(2)]];\n"
     "#endif\n"
     "#if HAS_TC1\n"
-    "    float2 tc1 [[attribute(3)]];\n"
+    "    TCV tc1 [[attribute(3)]];\n"
     "#endif\n"
     "};\n"
-    "struct VOut { float4 pos [[position]]; float2 tc; float2 tc1; float4 color; float fogdist; };\n"
+    "struct VOut { float4 pos [[position]]; TCV tc; TCV tc1; float4 color; float fogdist; };\n"
     // GL_ARB_texture_env_combine
     "static float4 source(int s, float4 t, float4 p, float4 k, float4 c) { return s == 0 ? t : (s == 1 ? p : (s == 2 ? k : c)); }\n"
     "static float3 argrgb(int s, int op, float4 t, float4 p, float4 k, float4 c)\n"
@@ -107,8 +122,8 @@ static const char *mslcommon =
     "static float4 shade(VOut in, constant FSU &u, texture2d<float> tex0, sampler s0, texture2d<float> tex1, sampler s1)\n"
     "{\n"
     "    float4 c = in.color;\n"
-    "    if(u.units.x != 0) c = texunit(u.unit[0], tex0.sample(s0, in.tc), c, in.color);\n"
-    "    if(u.units.y != 0) c = texunit(u.unit[1], tex1.sample(s1, in.tc1), c, in.color);\n"
+    "    if(u.units.x != 0) c = texunit(u.unit[0], tex0.sample(s0, TCIN(in.tc)), c, in.color);\n"
+    "    if(u.units.y != 0) c = texunit(u.unit[1], tex1.sample(s1, TCIN(in.tc1)), c, in.color);\n"
     "    return c;\n"
     "}\n";
 
@@ -119,14 +134,21 @@ static const char *mslvertex =
     "    float4 p = float4(in.pos, 1.0);\n"
     "    o.pos = u.mvp * p;\n"
     "#if HAS_TC\n"
-    "    o.tc = in.tc;\n"
+    "    TCV tc = in.tc;\n"
     "#else\n"
-    "    o.tc = float2(0.0);\n"
+    "    TCV tc = TCNONE;\n"
     "#endif\n"
     "#if HAS_TC1\n"
-    "    o.tc1 = in.tc1;\n"
+    "    TCV tc1 = in.tc1;\n"
     "#else\n"
-    "    o.tc1 = o.tc;\n"
+    "    TCV tc1 = tc;\n"
+    "#endif\n"
+    "#if TEXMAT\n"
+    "    o.tc = u.tex0 * tc;\n"     // the texture matrices (GL_TEXTURE)
+    "    o.tc1 = u.tex1 * tc1;\n"
+    "#else\n"
+    "    o.tc = tc;\n"
+    "    o.tc1 = tc1;\n"
     "#endif\n"
     "#if HAS_COLOR\n"
     "    o.color = in.color;\n"
@@ -157,24 +179,75 @@ static const char *mslpick =
     "    return in.pos.z;\n"
     "}\n";
 
+// post-processing (shaders.cpp's gamma and FXAA): a full-screen triangle sampling the scene. "GL" coordinates have their
+// origin at the bottom left like the GL versions, so FXAA's sample pattern is the same
+static const char *mslpost =
+    "#include <metal_stdlib>\n"
+    "using namespace metal;\n"
+    "struct PostOut { float4 pos [[position]]; float2 tc; };\n"
+    "struct PostU { float4 params; };\n" // gamma: exponent; FXAA: texel width, height
+    "vertex PostOut vpost(uint vid [[vertex_id]])\n"
+    "{\n"
+    "    float2 p = float2((vid << 1) & 2, vid & 2);\n"
+    "    PostOut o;\n"
+    "    o.pos = float4(p*2.0 - 1.0, 0.0, 1.0);\n"
+    "    o.tc = float2(p.x, 1.0 - p.y);\n"
+    "    return o;\n"
+    "}\n"
+    "fragment float4 fgamma(PostOut in [[stage_in]], constant PostU &u [[buffer(0)]], texture2d<float> tex [[texture(0)]], sampler s [[sampler(0)]])\n"
+    "{\n"
+    "    return float4(pow(tex.sample(s, in.tc).rgb, float3(u.params.x)), 1.0);\n"
+    "}\n"
+    "fragment float4 ffxaa(PostOut in [[stage_in]], constant PostU &u [[buffer(0)]], texture2d<float> tex [[texture(0)]], sampler s [[sampler(0)]])\n"
+    "{\n"
+    "    float2 tc = float2(in.tc.x, 1.0 - in.tc.y), texel = u.params.xy;\n"
+    "    #define S(p) tex.sample(s, float2((p).x, 1.0 - (p).y)).rgb\n"
+    "    const float3 luma = float3(0.299, 0.587, 0.114);\n"
+    "    float3 rgbNW = S(tc + float2(-1.0, -1.0) * texel), rgbNE = S(tc + float2(1.0, -1.0) * texel);\n"
+    "    float3 rgbSW = S(tc + float2(-1.0, 1.0) * texel), rgbSE = S(tc + float2(1.0, 1.0) * texel), rgbM = S(tc);\n"
+    "    float lNW = dot(rgbNW, luma), lNE = dot(rgbNE, luma), lSW = dot(rgbSW, luma), lSE = dot(rgbSE, luma), lM = dot(rgbM, luma);\n"
+    "    float lmin = min(lM, min(min(lNW, lNE), min(lSW, lSE))), lmax = max(lM, max(max(lNW, lNE), max(lSW, lSE)));\n"
+    "    float2 dir = float2(-((lNW + lNE) - (lSW + lSE)), (lNW + lSW) - (lNE + lSE));\n"
+    "    float reduce = max((lNW + lNE + lSW + lSE) * (0.25 / 8.0), 1.0 / 128.0);\n"
+    "    float rcpmin = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);\n"
+    "    dir = clamp(dir * rcpmin, float2(-8.0), float2(8.0)) * texel;\n"
+    "    float3 rgbA = 0.5 * (S(tc + dir * (1.0 / 3.0 - 0.5)) + S(tc + dir * (2.0 / 3.0 - 0.5)));\n"
+    "    float3 rgbB = rgbA * 0.5 + 0.25 * (S(tc - dir * 0.5) + S(tc + dir * 0.5));\n"
+    "    float lB = dot(rgbB, luma);\n"
+    "    return float4((lB < lmin || lB > lmax) ? rgbA : rgbB, 1.0);\n"
+    "}\n";
+
 // The same shaders in GLSL 450 for Vulkan (SDL GPU's SPIR-V resource sets: vertex uniforms in set 1, fragment samplers
 // in set 2, fragment uniforms in set 3). Not compiled yet (no SPIR-V compiler in the build); kept in step with the MSL.
 const char *gpuglslsources[] =
 {
     "#version 450\n"
+    "#if TEXMAT\n"
+    "#define TCV vec4\n"
+    "#define TCNONE vec4(0.0, 0.0, 0.0, 1.0)\n"
+    "#define TCOUT(m, t) ((m) * (t))\n"
+    "#else\n"
+    "#define TCV vec2\n"
+    "#define TCNONE vec2(0.0)\n"
+    "#define TCOUT(m, t) (t)\n"
+    "#endif\n"
     "layout(location = 0) in vec3 pos;\n"
     "#if HAS_TC\n"
-    "layout(location = 1) in vec2 tc;\n"
+    "layout(location = 1) in TCV tc;\n"
     "#endif\n"
     "#if HAS_COLOR\n"
     "layout(location = 2) in vec4 color;\n"
     "#endif\n"
     "#if HAS_TC1\n"
-    "layout(location = 3) in vec2 tc1;\n"
+    "layout(location = 3) in TCV tc1;\n"
     "#endif\n"
+    "#if TEXMAT\n"
+    "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; mat4 tex0; mat4 tex1; };\n"
+    "#else\n"
     "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; };\n"
-    "layout(location = 0) out vec2 otc;\n"
-    "layout(location = 1) out vec2 otc1;\n"
+    "#endif\n"
+    "layout(location = 0) out TCV otc;\n"
+    "layout(location = 1) out TCV otc1;\n"
     "layout(location = 2) out vec4 ocolor;\n"
     "layout(location = 3) out float ofogdist;\n"
     "void main()\n"
@@ -182,15 +255,17 @@ const char *gpuglslsources[] =
     "    vec4 p = vec4(pos, 1.0);\n"
     "    gl_Position = mvp * p;\n"
     "#if HAS_TC\n"
-    "    otc = tc;\n"
+    "    TCV t0 = tc;\n"
     "#else\n"
-    "    otc = vec2(0.0);\n"
+    "    TCV t0 = TCNONE;\n"
     "#endif\n"
     "#if HAS_TC1\n"
-    "    otc1 = tc1;\n"
+    "    TCV t1 = tc1;\n"
     "#else\n"
-    "    otc1 = otc;\n"
+    "    TCV t1 = t0;\n"
     "#endif\n"
+    "    otc = TCOUT(tex0, t0);\n"
+    "    otc1 = TCOUT(tex1, t1);\n"
     "#if HAS_COLOR\n"
     "    ocolor = color;\n"
     "#else\n"
@@ -201,8 +276,15 @@ const char *gpuglslsources[] =
 
     "#version 450\n"
     "struct Unit { ivec4 rgb; ivec4 rgbop; ivec4 alpha; ivec4 alphaop; vec4 k; };\n"
+    "#if TEXMAT\n"
+    "layout(location = 0) in vec4 tc;\n"
+    "layout(location = 1) in vec4 tc1;\n"
+    "#define SAMPLE(t, c) textureProj(t, c)\n"
+    "#else\n"
     "layout(location = 0) in vec2 tc;\n"
     "layout(location = 1) in vec2 tc1;\n"
+    "#define SAMPLE(t, c) texture(t, c)\n"
+    "#endif\n"
     "layout(location = 2) in vec4 color;\n"
     "layout(location = 3) in float fogdist;\n"
     "layout(set = 2, binding = 0) uniform sampler2D tex0;\n"
@@ -223,8 +305,8 @@ const char *gpuglslsources[] =
     "void main()\n"
     "{\n"
     "    vec4 c = color;\n"
-    "    if(units.x != 0) c = texunit(unit[0], texture(tex0, tc), c, color);\n"
-    "    if(units.y != 0) c = texunit(unit[1], texture(tex1, tc1), c, color);\n"
+    "    if(units.x != 0) c = texunit(unit[0], SAMPLE(tex0, tc), c, color);\n"
+    "    if(units.y != 0) c = texunit(unit[1], SAMPLE(tex1, tc1), c, color);\n"
     "#if PICK\n"
     "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
     "    ocolor = vec4(gl_FragCoord.z);\n"
@@ -236,7 +318,7 @@ const char *gpuglslsources[] =
     "}\n",
 };
 
-struct vsuniforms { float mvp[16], mv[16], color[4]; };
+struct vsuniforms { float mvp[16], mv[16], color[4], tex0[16], tex1[16]; };
 struct gpuunit { int rgb[4], rgbop[4], alpha[4], alphaop[4]; float k[4]; };
 struct fsuniforms { float fogcolor[4], fog[4], params[4]; int units[4]; gpuunit unit[2]; };
 
@@ -247,7 +329,7 @@ struct gputexture
     SDL_GPUTexture *tex;
     int w, h, levels;
     GLint wraps, wrapt, magfilter, minfilter, aniso;
-    bool used;
+    bool used, rendertarget;
 };
 
 struct gpubuffer
@@ -256,10 +338,17 @@ struct gpubuffer
     uint size;                  // of buf
     vector<uchar> data;         // CPU copy (uploaded when dirty)
     bool dirty, used;
+    // streamed buffers (GL_STREAM_DRAW, the world's vertices) can be refilled several times in a frame (minimap,
+    // reflection, main view): each version goes into the frame's vertex arena, and a draw uses the one current when
+    // it was recorded, as with GL
+    bool streamed;
+    uint arenaframe, arenaoffset;
 };
 
 enum { ATTR_POS = 0, ATTR_TC, ATTR_COLOR, ATTR_TC1, NUMATTRS }; // (ATTR_TC1: texture unit 1's coordinates)
-enum { TARGET_MAIN = 0, TARGET_PICK };
+// render targets: the scene (multisampled if antialiased), the crosshair pick target, FXAA (the scene filtered into a
+// second texture, gfx->postpass(0)) and what's drawn after FXAA (the HUD, into that second texture, single-sampled)
+enum { TARGET_MAIN = 0, TARGET_PICK, TARGET_FXAA, TARGET_POST };
 
 struct gpuarray { bool enabled; GLint size; GLenum type; GLsizei stride; const void *ptr; GLuint buffer; };
 
@@ -271,7 +360,8 @@ struct pipelinekey
     ushort pitch[NUMATTRS];
     uchar blend, srcblend, dstblend, colormask;
     uchar depthtest, depthfunc, depthwrite, cull;
-    uchar depthbias, pad[3];
+    uchar depthbias, stenciltest, stencilmask, texmatrix;
+    uchar sfront[4], sback[4];  // stencil function and fail, depth-fail and pass operations (stencilcode())
     float biasfactor, biasunits;
 };
 
@@ -288,7 +378,8 @@ enum { SRC_NONE = 0, SRC_BUFFER, SRC_ARENA };
 
 struct gpudraw
 {
-    int pipeline;
+    int pipeline, stencilref;
+    bool texmatrix;             // the vertex uniforms include the texture matrices
     uchar vbsrc[NUMATTRS];
     GLuint vbbuffer[NUMATTRS];
     uint vboffset[NUMATTRS];
@@ -298,16 +389,23 @@ struct gpudraw
     GLuint tex[2];              // texture units 0 and 1 (0: white)
     int samplerkey[2];
     float viewport[4];          // x, y (from the top), w, h
+    int scissor[4];             // x, y (from the top), w, h
     vsuniforms vs;
     fsuniforms fs;
 };
 
+// a copy of part of the frame into a texture (glCopyTexSubImage2D), after the pass it's recorded in
+struct gpucopy { GLuint tex; int dx, dy, sx, sy, w, h; };
+
 struct gpupass
 {
     int target;
-    bool clearcolor, cleardepth;
+    bool clearcolor, cleardepth, clearstencil;
     float color[4];
+    int stencilclear;
     int firstdraw, numdraws;
+    float depthclear;
+    int firstcopy, numcopies;   // copies of the frame into textures after this pass
 };
 
 struct samplerkey { GLint wraps, wrapt, magfilter, minfilter, aniso; };
@@ -323,13 +421,18 @@ struct sdlgpubackend : gfxdevice
 
     // GL state
     GLenum matrixmodeidx;
-    gmat stacks[3][32];
-    int stackpos[3];
+    gmat stacks[6][32];         // modelview, projection, texture units 0-3
+    int stackpos[6];
     float curcolor[4], clearcol[4], fogstart, fogend, fogcolor[4];
     bool caps[16], texenabled[4];
     GLenum blendsrc, blenddst, depthfn, cullmode, alphafn;
     float alpharef, offsetfactor, offsetunits;
     bool depthwrite, colormaskbits[4];
+    GLenum stencilstate[2][4];  // front and back faces: function, fail, depth-fail and pass operations
+    GLint stencilrefv, clearstencilv;
+    GLuint stencilmaskv;
+    GLenum stencilface;         // GL_EXT_stencil_two_side's active face
+    int stencilbitsv;           // 8 if the depth target has a stencil buffer (stencilbits, for stencil shadows)
     int viewportv[4];
     int activetex, clientunit;
     GLuint boundtex[4];
@@ -352,12 +455,14 @@ struct sdlgpubackend : gfxdevice
     vector<samplerkey> samplerkeys;
     hashtable<pipelinekey, int> pipelineindex;
     vector<SDL_GPUGraphicsPipeline *> pipelines;
-    SDL_GPUShader *vshaders[8], *fshader, *pickshader;
+    vector<pipelinekey> pipelinekeys;
+    SDL_GPUShader *vshaders[16], *fshaders[2], *pickshaders[2]; // variants: 8 (and [1]) = with texture matrices
 
     // the frame being recorded
     bool recording;
     vector<gpupass> passes;
     vector<gpudraw> draws;
+    vector<gpucopy> copies;
     int curpass;
     vector<uchar> vertexarena;
     vector<uint> indexarena;
@@ -366,35 +471,56 @@ struct sdlgpubackend : gfxdevice
     uint texuploadbytes;
 
     // targets
-    SDL_GPUTexture *colortex, *msaatex, *depthtex, *pickcolor, *pickdepth;
+    SDL_GPUTexture *colortex, *msaatex, *depthtex, *pickcolor, *pickdepth, *posttex, *postdepth;
+    SDL_GPUTexture *lastfinal;  // the last submitted frame's image (screenshots)
+    // post-processing of the frame being recorded: FXAA done (later passes draw into posttex), gamma exponent (1: none)
+    bool postfxactive;
+    float gammaexponent;
+    SDL_GPUShader *postvs, *gammafs, *fxaafs;
+    SDL_GPUGraphicsPipeline *fxaapipe, *gammapipe;
+    SDL_GPUTextureFormat gammapipeformat;
+    SDL_GPUSampler *postsampler;
     int targetw, targeth;
     SDL_GPUBuffer *arenavb, *arenaib;
     uint arenavbsize, arenaibsize;
+    uint lastuploadsize, smallframes; // shrinking the arena and upload buffers again (shrinkbuffers())
     SDL_GPUTransferBuffer *pickdownload;
     SDL_GPUFence *pickfence;
     bool pickpending;
 
     sdlgpubackend() : dev(NULL), window(NULL), format(SDL_GPU_SHADERFORMAT_INVALID), samples(1), depthbits(32),
         depthformat(SDL_GPU_TEXTUREFORMAT_D32_FLOAT), samplecount(SDL_GPU_SAMPLECOUNT_1), matrixmodeidx(0), activetex(0),
-        arraybuffer(0), elementbuffer(0), immmode(0), emptytex(NULL), fshader(NULL), pickshader(NULL), recording(false),
+        arraybuffer(0), elementbuffer(0), immmode(0), emptytex(NULL), recording(false),
         curpass(-1), texuploadbytes(0), colortex(NULL), msaatex(NULL), depthtex(NULL), pickcolor(NULL), pickdepth(NULL),
         targetw(0), targeth(0), arenavb(NULL), arenaib(NULL), arenavbsize(0), arenaibsize(0), pickdownload(NULL),
         pickfence(NULL), pickpending(false), frameupload(NULL), frameuploadsize(0)
     {
+        framecount = 0;
+        lastuploadsize = smallframes = 0;
+        stencilbitsv = 0;
+        posttex = postdepth = lastfinal = NULL;
+        postfxactive = false;
+        gammaexponent = 1;
+        postvs = gammafs = fxaafs = NULL;
+        fxaapipe = gammapipe = NULL;
+        gammapipeformat = SDL_GPU_TEXTUREFORMAT_INVALID;
+        postsampler = NULL;
         wantvsync = -1;
         presentmode = SDL_GPUPresentMode(-1);
-        loopi(8) vshaders[i] = NULL;
+        loopi(16) vshaders[i] = NULL;
+        loopi(2) fshaders[i] = pickshaders[i] = NULL;
         resetstate();
         textures.add(); // handle 0: no texture
         memset(&textures[0], 0, sizeof(gputexture));
         textures[0].used = true;
         buffers.add();
         buffers[0].buf = NULL; buffers[0].size = 0; buffers[0].dirty = false; buffers[0].used = true;
+        buffers[0].streamed = false; buffers[0].arenaframe = buffers[0].arenaoffset = 0;
     }
 
     void resetstate()
     {
-        loopi(3) { stackpos[i] = 0; stacks[i][0].identity(); }
+        loopi(6) { stackpos[i] = 0; stacks[i][0].identity(); }
         matrixmodeidx = 0;
         loopi(4) curcolor[i] = 1;
         loopi(4) clearcol[i] = 0;
@@ -407,7 +533,12 @@ struct sdlgpubackend : gfxdevice
         alpharef = 0; offsetfactor = offsetunits = 0;
         depthwrite = true;
         loopi(4) colormaskbits[i] = true;
-        loopi(4) viewportv[i] = 0;
+        loopi(4) viewportv[i] = scissorv[i] = 0;
+        cleardepthv = 1;
+        loopi(2) { stencilstate[i][0] = GL_ALWAYS; loopj(3) stencilstate[i][1+j] = GL_KEEP; }
+        stencilrefv = clearstencilv = 0;
+        stencilmaskv = ~0U;
+        stencilface = GL_FRONT;
         activetex = clientunit = 0;
         loopi(4) boundtex[i] = 0;
         loopi(NUMATTRS) { memset(&arrays[i], 0, sizeof(gpuarray)); }
@@ -442,13 +573,24 @@ struct sdlgpubackend : gfxdevice
         displaychanged();
         SDL_SetGPUAllowedFramesInFlight(dev, gpuframes);
 
-        // depth: 32-bit float (Apple's GL gives 32 bits too), else 24-bit
-        depthformat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-        depthbits = 32;
-        if(!SDL_GPUTextureSupportsFormat(dev, depthformat, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+        // depth: 32-bit float (Apple's GL gives 32 bits too), else 24-bit; with an 8-bit stencil buffer if stencilbits
+        // asks for one (stencil shadows, shadow.cpp)
+        static const struct { SDL_GPUTextureFormat format; int depth, stencil; } depthformats[] =
         {
-            depthformat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
-            depthbits = 24;
+            { SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT, 32, 8 }, { SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT, 24, 8 },
+            { SDL_GPU_TEXTUREFORMAT_D32_FLOAT, 32, 0 }, { SDL_GPU_TEXTUREFORMAT_D24_UNORM, 24, 0 }
+        };
+        depthformat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+        depthbits = 24;
+        stencilbitsv = 0;
+        loopi(sizeof(depthformats)/sizeof(depthformats[0]))
+        {
+            if(depthformats[i].stencil && !stencilbits) continue;
+            if(!SDL_GPUTextureSupportsFormat(dev, depthformats[i].format, SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) continue;
+            depthformat = depthformats[i].format;
+            depthbits = depthformats[i].depth;
+            stencilbitsv = depthformats[i].stencil;
+            break;
         }
         samples = 1;
         samplecount = SDL_GPU_SAMPLECOUNT_1;
@@ -515,6 +657,7 @@ struct sdlgpubackend : gfxdevice
     }
 
     int getdepthbits() { return depthbits; }
+    int getstencilbits() { return stencilbitsv; }
     int getsamples() { return samples; }
 
     void releasetargets()
@@ -522,9 +665,107 @@ struct sdlgpubackend : gfxdevice
         if(colortex) SDL_ReleaseGPUTexture(dev, colortex);
         if(msaatex) SDL_ReleaseGPUTexture(dev, msaatex);
         if(depthtex) SDL_ReleaseGPUTexture(dev, depthtex);
-        colortex = msaatex = depthtex = NULL;
+        if(posttex) SDL_ReleaseGPUTexture(dev, posttex);
+        if(postdepth) SDL_ReleaseGPUTexture(dev, postdepth);
+        colortex = msaatex = depthtex = posttex = postdepth = lastfinal = NULL;
         targetw = targeth = 0;
     }
+
+    void setuppostrargets()
+    {
+        if(posttex) return;
+        posttex = createtarget(targetw, targeth, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, SDL_GPU_SAMPLECOUNT_1);
+        postdepth = createtarget(targetw, targeth, depthformat, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, SDL_GPU_SAMPLECOUNT_1);
+    }
+
+    SDL_GPUShader *makepostshader(const char *entry, SDL_GPUShaderStage stage, int samplers, int uniforms)
+    {
+        SDL_GPUShaderCreateInfo si;
+        memset(&si, 0, sizeof(si));
+        si.code = (const Uint8 *)mslpost;
+        si.code_size = strlen(mslpost);
+        si.entrypoint = entry;
+        si.format = SDL_GPU_SHADERFORMAT_MSL;
+        si.stage = stage;
+        si.num_samplers = samplers;
+        si.num_uniform_buffers = uniforms;
+        SDL_GPUShader *sh = SDL_CreateGPUShader(dev, &si);
+        if(!sh) conoutf("\f3SDL GPU: shader %s failed to compile: %s", entry, SDL_GetError());
+        return sh;
+    }
+
+    SDL_GPUGraphicsPipeline *postpipeline(SDL_GPUShader *fs, SDL_GPUTextureFormat format)
+    {
+        if(!postvs) postvs = makepostshader("vpost", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        if(!postvs || !fs) return NULL;
+        SDL_GPUColorTargetDescription ctd;
+        memset(&ctd, 0, sizeof(ctd));
+        ctd.format = format;
+        SDL_GPUGraphicsPipelineCreateInfo pi;
+        memset(&pi, 0, sizeof(pi));
+        pi.vertex_shader = postvs;
+        pi.fragment_shader = fs;
+        pi.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        pi.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+        pi.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+        pi.rasterizer_state.enable_depth_clip = true;
+        pi.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+        pi.target_info.color_target_descriptions = &ctd;
+        pi.target_info.num_color_targets = 1;
+        SDL_GPUGraphicsPipeline *p = SDL_CreateGPUGraphicsPipeline(dev, &pi);
+        if(!p) conoutf("\f3SDL GPU: post-processing pipeline failed: %s", SDL_GetError());
+        if(!postsampler)
+        {
+            SDL_GPUSamplerCreateInfo si;
+            memset(&si, 0, sizeof(si));
+            si.min_filter = si.mag_filter = SDL_GPU_FILTER_LINEAR;
+            si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+            si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+            postsampler = SDL_CreateGPUSampler(dev, &si);
+        }
+        return p;
+    }
+
+    // a full-screen pass: src through a post-processing shader into dst
+    void runpostpass(SDL_GPUCommandBuffer *cmd, SDL_GPUGraphicsPipeline *pipe, SDL_GPUTexture *src, SDL_GPUTexture *dst, const float *params)
+    {
+        if(!pipe || !src || !dst) return;
+        SDL_GPUColorTargetInfo ct;
+        memset(&ct, 0, sizeof(ct));
+        ct.texture = dst;
+        ct.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        ct.store_op = SDL_GPU_STOREOP_STORE;
+        SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+        if(!rp) return;
+        SDL_BindGPUGraphicsPipeline(rp, pipe);
+        SDL_GPUTextureSamplerBinding tsb = { src, postsampler };
+        SDL_BindGPUFragmentSamplers(rp, 0, &tsb, 1);
+        float u[4] = { params[0], params[1], params[2], params[3] };
+        SDL_PushGPUFragmentUniformData(cmd, 0, u, sizeof(u));
+        SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+        SDL_EndGPURenderPass(rp);
+    }
+
+    // shaders.cpp's post-processing: 0 = FXAA of the scene (before the HUD), 1 = gamma (applied when the frame is shown)
+    bool postpass(int kind, float param)
+    {
+        if(!dev) return false;
+        beginrecording();
+        if(kind == 1) { gammaexponent = param; return true; }
+        if(postfxactive) return true;
+        if(!fxaafs) fxaafs = makepostshader("ffxaa", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+        if(!fxaapipe) fxaapipe = postpipeline(fxaafs, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
+        if(!fxaapipe) return false;
+        if(curpass < 0 && passes.empty()) openpass(TARGET_MAIN); // (an empty scene)
+        curpass = -1;
+        gpupass &p = openpass(TARGET_FXAA);
+        p.clearcolor = p.cleardepth = false;
+        curpass = -1;
+        postfxactive = true; // the HUD and anything after it go into the filtered image
+        return true;
+    }
+
+    int maintarget() { return postfxactive ? TARGET_POST : TARGET_MAIN; }
 
     SDL_GPUTexture *createtarget(int w, int h, SDL_GPUTextureFormat fmt, SDL_GPUTextureUsageFlags usage, SDL_GPUSampleCount sc)
     {
@@ -550,6 +791,7 @@ struct sdlgpubackend : gfxdevice
         depthtex = createtarget(w, h, depthformat, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, samplecount);
         targetw = w;
         targeth = h;
+        if(postfxactive) setuppostrargets();
         if(!pickcolor)
         {
             pickcolor = createtarget(1, 1, SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, SDL_GPU_SAMPLECOUNT_1);
@@ -563,7 +805,7 @@ struct sdlgpubackend : gfxdevice
 
     SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, int variant, int samplers, int uniforms)
     {
-        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n", variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0);
+        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n#define TEXMAT %d\n", variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0, variant&8 ? 1 : 0);
         vector<char> src;
         src.put(defs, strlen(defs));
         src.put(mslcommon, strlen(mslcommon));
@@ -585,11 +827,15 @@ struct sdlgpubackend : gfxdevice
 
     bool loadshaders()
     {
-        if(fshader) return true;
-        loopi(8) if(!(vshaders[i] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, i, 0, 1))) return false;
-        fshader = makeshader(mslfragment, "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2, 1);
-        pickshader = makeshader(mslpick, "fpick", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2, 1);
-        return fshader && pickshader;
+        if(fshaders[0]) return true;
+        loopi(16) if(!(vshaders[i] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, i, 0, 1))) return false;
+        loopi(2)
+        {
+            fshaders[i] = makeshader(mslfragment, "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, 7 | (i ? 8 : 0), 2, 1);
+            pickshaders[i] = makeshader(mslpick, "fpick", SDL_GPU_SHADERSTAGE_FRAGMENT, 7 | (i ? 8 : 0), 2, 1);
+            if(!fshaders[i] || !pickshaders[i]) { fshaders[0] = NULL; return false; }
+        }
+        return true;
     }
 
     static SDL_GPUBlendFactor blendfactor(GLenum f)
@@ -647,7 +893,7 @@ struct sdlgpubackend : gfxdevice
             va[n].offset = 0;
             n++;
         }
-        int variant = (k.attrs[ATTR_TC] ? 1 : 0) | (k.attrs[ATTR_COLOR] ? 2 : 0) | (k.attrs[ATTR_TC1] ? 4 : 0);
+        int variant = (k.attrs[ATTR_TC] ? 1 : 0) | (k.attrs[ATTR_COLOR] ? 2 : 0) | (k.attrs[ATTR_TC1] ? 4 : 0) | (k.texmatrix ? 8 : 0);
 
         SDL_GPUColorTargetDescription ctd;
         memset(&ctd, 0, sizeof(ctd));
@@ -666,7 +912,7 @@ struct sdlgpubackend : gfxdevice
         SDL_GPUGraphicsPipelineCreateInfo pi;
         memset(&pi, 0, sizeof(pi));
         pi.vertex_shader = vshaders[variant];
-        pi.fragment_shader = k.target == TARGET_PICK ? pickshader : fshader;
+        pi.fragment_shader = (k.target == TARGET_PICK ? pickshaders : fshaders)[k.texmatrix ? 1 : 0];
         pi.vertex_input_state.vertex_buffer_descriptions = vbd;
         pi.vertex_input_state.num_vertex_buffers = n;
         pi.vertex_input_state.vertex_attributes = va;
@@ -679,11 +925,26 @@ struct sdlgpubackend : gfxdevice
         pi.rasterizer_state.depth_bias_constant_factor = k.biasunits;
         pi.rasterizer_state.depth_bias_slope_factor = k.biasfactor;
         pi.rasterizer_state.enable_depth_clip = true;
-        pi.multisample_state.sample_count = k.target == TARGET_PICK ? SDL_GPU_SAMPLECOUNT_1 : samplecount;
+        pi.multisample_state.sample_count = k.samples > 1 ? samplecount : SDL_GPU_SAMPLECOUNT_1;
         pi.multisample_state.enable_alpha_to_coverage = k.alphacoverage != 0;
         pi.depth_stencil_state.enable_depth_test = true;
         pi.depth_stencil_state.compare_op = k.depthtest ? compareop(GLenum(GL_NEVER + k.depthfunc)) : SDL_GPU_COMPAREOP_ALWAYS;
         pi.depth_stencil_state.enable_depth_write = k.depthtest && k.depthwrite;
+        if(k.stenciltest)
+        {
+            pi.depth_stencil_state.enable_stencil_test = true;
+            loopi(2)
+            {
+                const uchar *f = i ? k.sback : k.sfront;
+                SDL_GPUStencilOpState &o = i ? pi.depth_stencil_state.back_stencil_state : pi.depth_stencil_state.front_stencil_state;
+                o.compare_op = compareop(GLenum(GL_NEVER + f[0]));
+                o.fail_op = stencilgpuop(f[1]);
+                o.depth_fail_op = stencilgpuop(f[2]);
+                o.pass_op = stencilgpuop(f[3]);
+            }
+            pi.depth_stencil_state.compare_mask = k.stencilmask;
+            pi.depth_stencil_state.write_mask = 0xFF;
+        }
         pi.target_info.color_target_descriptions = &ctd;
         pi.target_info.num_color_targets = 1;
         pi.target_info.depth_stencil_format = depthformat;
@@ -693,6 +954,7 @@ struct sdlgpubackend : gfxdevice
         else if(gpudebug) conoutf("SDL GPU: pipeline %d (target %d, topology %d, attributes %d/%d/%d/%d, blend %d, depth %d/%d/%d, cull %d)",
             pipelines.length(), k.target, k.topology, k.attrs[0], k.attrs[1], k.attrs[2], k.attrs[3], k.blend, k.depthtest, k.depthfunc, k.depthwrite, k.cull);
         pipelines.add(p);
+        pipelinekeys.add(k);
         pipelineindex[k] = pipelines.length() - 1;
         return p ? pipelines.length() - 1 : -1;
     }
@@ -718,6 +980,7 @@ struct sdlgpubackend : gfxdevice
             case GL_SCISSOR_TEST: return 10;
             case GL_STENCIL_TEST: return 11;
             case GL_DITHER: return 12;
+            case GL_STENCIL_TEST_TWO_SIDE_EXT: return 13;
             default: return 15;
         }
     }
@@ -736,13 +999,15 @@ struct sdlgpubackend : gfxdevice
     void color3f(GLfloat r, GLfloat g, GLfloat b) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = 1; }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = a; }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { color3f(r/255.0f, g/255.0f, b/255.0f); }
+    void color4ubv(const GLubyte *v) { color4f(v[0]/255.0f, v[1]/255.0f, v[2]/255.0f, v[3]/255.0f); }
     void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { color4f(r/255.0f, g/255.0f, b/255.0f, a/255.0f); }
     void fogi(GLenum pname, GLint v) { fogf(pname, float(v)); }
     void fogf(GLenum pname, GLfloat v) { if(pname == GL_FOG_START) fogstart = v; else if(pname == GL_FOG_END) fogend = v; }
     void fogfv(GLenum pname, const GLfloat *v) { if(pname == GL_FOG_COLOR) loopi(4) fogcolor[i] = v[i]; else if(v) fogf(pname, v[0]); }
     void hint(GLenum target, GLenum mode) {}
     void shademodel(GLenum mode) {}
-    void cleardepth(GLdouble d) {}
+    float cleardepthv;
+    void cleardepth(GLdouble d) { cleardepthv = float(d); }
     void texenvi(GLenum pname, GLint v) {}             // the combiners are read from texture.cpp's tmus (tmuismodulate2x)
     void texenvfv(GLenum pname, const GLfloat *v) {}
     void activetexture(GLenum unit) { activetex = clamp(int(unit - GL_TEXTURE0_ARB), 0, 3); }
@@ -760,17 +1025,82 @@ struct sdlgpubackend : gfxdevice
     }
 
     void viewport(int x, int y, int w, int h) { viewportv[0] = x; viewportv[1] = y; viewportv[2] = w; viewportv[3] = h; }
+    int scissorv[4];
+    void scissor(int x, int y, int w, int h) { scissorv[0] = x; scissorv[1] = y; scissorv[2] = w; scissorv[3] = h; }
     void clearcolor(float r, float g, float b, float a) { clearcol[0] = r; clearcol[1] = g; clearcol[2] = b; clearcol[3] = a; }
-    void clearstencil(int s) {}
+    void clearstencil(int s) { clearstencilv = s; }
+
+    // stencil (stencil shadows): the faces stencilfunc() and stencilop() set, both or the active one
+    void stencilfaces(int &first, int &last)
+    {
+        if(caps[capindex(GL_STENCIL_TEST_TWO_SIDE_EXT)]) first = last = stencilface == GL_BACK ? 1 : 0;
+        else { first = 0; last = 1; }
+    }
+    void stencilfunc(GLenum func, GLint ref, GLuint mask)
+    {
+        int first, last;
+        stencilfaces(first, last);
+        for(int i = first; i <= last; i++) stencilstate[i][0] = func;
+        stencilrefv = ref; // (one reference and compare mask for both faces: all the GPU APIs have)
+        stencilmaskv = mask;
+    }
+    void stencilop(GLenum fail, GLenum zfail, GLenum zpass)
+    {
+        int first, last;
+        stencilfaces(first, last);
+        for(int i = first; i <= last; i++) { stencilstate[i][1] = fail; stencilstate[i][2] = zfail; stencilstate[i][3] = zpass; }
+    }
+    void stencilfuncseparate(GLenum frontfunc, GLenum backfunc, GLint ref, GLuint mask)
+    {
+        stencilstate[0][0] = frontfunc;
+        stencilstate[1][0] = backfunc;
+        stencilrefv = ref;
+        stencilmaskv = mask;
+    }
+    void stencilopseparate(GLenum face, GLenum fail, GLenum zfail, GLenum zpass)
+    {
+        loopi(2) if(face == GL_FRONT_AND_BACK || face == (i ? GL_BACK : GL_FRONT))
+        {
+            stencilstate[i][1] = fail; stencilstate[i][2] = zfail; stencilstate[i][3] = zpass;
+        }
+    }
+    void activestencilface(GLenum face) { stencilface = face; }
+
+    static uchar stencilcode(GLenum op)
+    {
+        switch(op)
+        {
+            case GL_ZERO: return 1;
+            case GL_REPLACE: return 2;
+            case GL_INCR: return 3;
+            case GL_DECR: return 4;
+            case GL_INVERT: return 5;
+            case GL_INCR_WRAP_EXT: return 6;
+            case GL_DECR_WRAP_EXT: return 7;
+            default: return 0; // GL_KEEP
+        }
+    }
+    static SDL_GPUStencilOp stencilgpuop(uchar code)
+    {
+        static const SDL_GPUStencilOp ops[8] =
+        {
+            SDL_GPU_STENCILOP_KEEP, SDL_GPU_STENCILOP_ZERO, SDL_GPU_STENCILOP_REPLACE, SDL_GPU_STENCILOP_INCREMENT_AND_CLAMP,
+            SDL_GPU_STENCILOP_DECREMENT_AND_CLAMP, SDL_GPU_STENCILOP_INVERT, SDL_GPU_STENCILOP_INCREMENT_AND_WRAP,
+            SDL_GPU_STENCILOP_DECREMENT_AND_WRAP
+        };
+        return ops[code&7];
+    }
     void finish() { if(dev) SDL_WaitForGPUIdle(dev); }
 
     // --- matrices
 
-    gmat &top() { return stacks[matrixmodeidx][stackpos[matrixmodeidx]]; }
+    // (GL_TEXTURE applies to the texture unit active at the time of each call)
+    int curstack() { return matrixmodeidx == 2 ? 2 + activetex : matrixmodeidx; }
+    gmat &top() { return stacks[curstack()][stackpos[curstack()]]; }
     void matrixmode(GLenum mode) { matrixmodeidx = mode == GL_PROJECTION ? 1 : (mode == GL_TEXTURE ? 2 : 0); }
     void loadidentity() { top().identity(); }
-    void pushmatrix() { int &p = stackpos[matrixmodeidx]; if(p < 31) { stacks[matrixmodeidx][p+1] = stacks[matrixmodeidx][p]; p++; } }
-    void popmatrix() { int &p = stackpos[matrixmodeidx]; if(p > 0) p--; }
+    void pushmatrix() { int k = curstack(), &p = stackpos[k]; if(p < 31) { stacks[k][p+1] = stacks[k][p]; p++; } }
+    void popmatrix() { int &p = stackpos[curstack()]; if(p > 0) p--; }
     void loadmatrix(const GLfloat *m) { memcpy(top().v, m, sizeof(top().v)); }
     void multmatrix(const GLfloat *m) { top().mulright(m); }
     void translate(GLfloat x, GLfloat y, GLfloat z)
@@ -827,6 +1157,7 @@ struct sdlgpubackend : gfxdevice
             case GL_MODELVIEW_MATRIX: memcpy(v, stacks[0][stackpos[0]].v, 16*sizeof(float)); break;
             case GL_PROJECTION_MATRIX: memcpy(v, stacks[1][stackpos[1]].v, 16*sizeof(float)); break;
             case GL_CURRENT_COLOR: loopi(4) v[i] = curcolor[i]; break;
+            case GL_LINE_WIDTH: v[0] = 1; break;
             default: v[0] = 0; break;
         }
     }
@@ -887,6 +1218,20 @@ struct sdlgpubackend : gfxdevice
 
     static bool mipmapped(GLint minfilter) { return minfilter != GL_NEAREST && minfilter != GL_LINEAR; }
 
+    SDL_GPUTexture *newtexture(int w, int h, int levels, bool rendertarget)
+    {
+        SDL_GPUTextureCreateInfo ti;
+        memset(&ti, 0, sizeof(ti));
+        ti.type = SDL_GPU_TEXTURETYPE_2D;
+        ti.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        ti.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | (rendertarget ? SDL_GPU_TEXTUREUSAGE_COLOR_TARGET : 0);
+        ti.width = w;
+        ti.height = h;
+        ti.layer_count_or_depth = 1;
+        ti.num_levels = levels;
+        return SDL_CreateGPUTexture(dev, &ti);
+    }
+
     // texture data in any of the game's formats, as RGBA8 (SDL GPU has no RGB or luminance formats)
     static void torgba(vector<uchar> &out, int w, int h, GLenum format, const uchar *src)
     {
@@ -915,16 +1260,7 @@ struct sdlgpubackend : gfxdevice
             if(!g.tex || g.w != w || g.h != h || g.levels != levels)
             {
                 if(g.tex) SDL_ReleaseGPUTexture(dev, g.tex);
-                SDL_GPUTextureCreateInfo ti;
-                memset(&ti, 0, sizeof(ti));
-                ti.type = SDL_GPU_TEXTURETYPE_2D;
-                ti.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-                ti.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-                ti.width = w;
-                ti.height = h;
-                ti.layer_count_or_depth = 1;
-                ti.num_levels = levels;
-                g.tex = SDL_CreateGPUTexture(dev, &ti);
+                g.tex = newtexture(w, h, levels, g.rendertarget);
                 g.w = w; g.h = h; g.levels = levels;
             }
         }
@@ -943,6 +1279,29 @@ struct sdlgpubackend : gfxdevice
         // (only the light grid uses this, and it's GL-only for now)
     }
 
+    // glCopyTexSubImage2D: part of the frame (as drawn so far) into the bound texture. Recorded after the current pass,
+    // which ends there; executed as a blit flipped vertically, so the texture's rows are bottom-up as in GL (its users
+    // compute texture coordinates the GL way). A blit needs a render target, so the texture becomes one on first use.
+    void copytexsubimage2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei w, GLsizei h)
+    {
+        GLuint idx = boundtex[activetex];
+        if(!idx || idx >= (GLuint)textures.length() || !textures[idx].tex || level || w <= 0 || h <= 0) return;
+        gputexture &g = textures[idx];
+        if(!g.rendertarget)
+        {
+            SDL_ReleaseGPUTexture(dev, g.tex);
+            g.tex = newtexture(g.w, g.h, g.levels, true);
+            g.rendertarget = true;
+        }
+        beginrecording();
+        if(curpass < 0) openpass(maintarget());
+        if(passes[curpass].target != TARGET_MAIN && passes[curpass].target != TARGET_POST) return;
+        gpucopy &c = copies.add();
+        c.tex = idx; c.dx = xoffset; c.dy = yoffset; c.sx = x; c.sy = y; c.w = w; c.h = h;
+        passes[curpass].numcopies++;
+        curpass = -1; // later draws go into a new pass that loads what's there
+    }
+
     // --- buffer objects
 
     void genbuffers(GLsizei n, GLuint *b)
@@ -954,6 +1313,7 @@ struct sdlgpubackend : gfxdevice
             else { idx = buffers.length(); buffers.add(); }
             gpubuffer &g = buffers[idx];
             g.buf = NULL; g.size = 0; g.data.setsize(0); g.dirty = false; g.used = true;
+            g.streamed = false; g.arenaframe = 0; g.arenaoffset = 0;
             b[i] = idx;
         }
     }
@@ -992,7 +1352,20 @@ struct sdlgpubackend : gfxdevice
         g->data.setsize(0);
         uchar *d = g->data.pad(size);
         if(data) memcpy(d, data, size); else memset(d, 0, size);
-        g->dirty = true;
+        g->streamed = usage == GL_STREAM_DRAW_ARB && target == GL_ARRAY_BUFFER_ARB;
+        g->dirty = !g->streamed;
+        g->arenaframe = 0; // (put into this frame's arena when a draw uses it)
+    }
+
+    // where a streamed buffer's current contents are in this frame's vertex arena
+    uint streamedoffset(gpubuffer &g)
+    {
+        if(g.arenaframe != framecount)
+        {
+            g.arenaoffset = arenaput(g.data.getbuf(), g.data.length());
+            g.arenaframe = framecount;
+        }
+        return g.arenaoffset;
     }
 
     void buffersubdata(GLenum target, GLintptr offset, GLsizeiptr size, const void *data)
@@ -1025,6 +1398,7 @@ struct sdlgpubackend : gfxdevice
     }
     void vertexpointer(GLint size, GLenum type, GLsizei stride, const void *p) { setarray(ATTR_POS, size, type, stride, p); }
     void colorpointer(GLint size, GLenum type, GLsizei stride, const void *p) { setarray(ATTR_COLOR, size, type, stride, p); }
+    void normalpointer(GLenum type, GLsizei stride, const void *p) {} // (no lighting: normals are unused)
     void texcoordpointer(GLint size, GLenum type, GLsizei stride, const void *p) { if(clientunit <= 1) setarray(clientunit ? ATTR_TC1 : ATTR_TC, size, type, stride, p); }
 
     static SDL_GPUVertexElementFormat elementformat(int attr, GLint size, GLenum type)
@@ -1043,12 +1417,18 @@ struct sdlgpubackend : gfxdevice
 
     // --- recording
 
+    uint framecount;
+
     void beginrecording()
     {
         if(recording) return;
         recording = true;
+        framecount++;
+        postfxactive = false;
+        gammaexponent = 1;
         passes.setsize(0);
         draws.setsize(0);
+        copies.setsize(0);
         curpass = -1;
         vertexarena.setsize(0);
         indexarena.setsize(0);
@@ -1063,9 +1443,14 @@ struct sdlgpubackend : gfxdevice
         loopv(passes) if(passes[i].target == target) first = false;
         gpupass &p = passes.add();
         p.target = target;
-        p.clearcolor = p.cleardepth = first;
+        p.clearcolor = p.cleardepth = p.clearstencil = first;
+        p.stencilclear = clearstencilv;
+        if(target == TARGET_POST) p.clearcolor = false; // (it starts with the FXAA output)
         loopi(4) p.color[i] = target == TARGET_PICK ? 1.0f : clearcol[i];
         p.firstdraw = draws.length();
+        p.depthclear = cleardepthv;
+        p.firstcopy = copies.length();
+        p.numcopies = 0;
         p.numdraws = 0;
         curpass = passes.length() - 1;
         return p;
@@ -1073,21 +1458,23 @@ struct sdlgpubackend : gfxdevice
 
     void clear(GLbitfield mask)
     {
-        if(!(mask & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT))) return;
+        if(!(mask & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))) return;
         beginrecording();
         if(curpass >= 0 && passes[curpass].target == TARGET_PICK) return; // (cleared when the pick pass begins)
         if(curpass < 0 || passes[curpass].numdraws)
         {
             curpass = -1;
-            gpupass &p = openpass(TARGET_MAIN);
+            gpupass &p = openpass(maintarget());
             if(mask & GL_COLOR_BUFFER_BIT) p.clearcolor = true;
             if(mask & GL_DEPTH_BUFFER_BIT) p.cleardepth = true;
+            if(mask & GL_STENCIL_BUFFER_BIT) { p.clearstencil = true; p.stencilclear = clearstencilv; }
         }
         else
         {
             gpupass &p = passes[curpass];
             if(mask & GL_COLOR_BUFFER_BIT) { p.clearcolor = true; loopi(4) p.color[i] = clearcol[i]; }
             if(mask & GL_DEPTH_BUFFER_BIT) p.cleardepth = true;
+            if(mask & GL_STENCIL_BUFFER_BIT) { p.clearstencil = true; p.stencilclear = clearstencilv; }
         }
         if(mask & GL_COLOR_BUFFER_BIT) loopi(4) passes[curpass].color[i] = clearcol[i];
     }
@@ -1129,7 +1516,7 @@ struct sdlgpubackend : gfxdevice
     void record(GLenum mode, int base, int numverts, uint firstindex, uint numindices, bool ibuffer, uint ibufferoffset, bool immediate = false)
     {
         if(!numindices || !dev) return;
-        gpupass &pass = openpass(curpass >= 0 ? passes[curpass].target : TARGET_MAIN);
+        gpupass &pass = openpass(curpass >= 0 ? passes[curpass].target : maintarget());
         gpudraw &d = draws.add();
         memset(&d, 0, sizeof(d));
         pipelinekey k;
@@ -1154,7 +1541,12 @@ struct sdlgpubackend : gfxdevice
             if(!a.enabled || (i == ATTR_TC && !texenabled[0]) || (i == ATTR_TC1 && !texenabled[1])) continue;
             k.attrs[i] = elementformat(i, a.size, a.type);
             k.pitch[i] = a.stride;
-            if(a.buffer)
+            if(a.buffer && a.buffer < (GLuint)buffers.length() && buffers[a.buffer].streamed)
+            {
+                d.vbsrc[i] = SRC_ARENA;
+                d.vboffset[i] = streamedoffset(buffers[a.buffer]) + uint((uintptr_t)a.ptr) + base*a.stride;
+            }
+            else if(a.buffer)
             {
                 d.vbsrc[i] = SRC_BUFFER;
                 d.vbbuffer[i] = a.buffer;
@@ -1182,8 +1574,9 @@ struct sdlgpubackend : gfxdevice
         d.numindices = numindices;
 
         // fixed-function state
-        k.samples = picking ? 1 : samples;
-        k.alphacoverage = !picking && samples > 1 && caps[capindex(GL_SAMPLE_ALPHA_TO_COVERAGE)] && caps[capindex(GL_ALPHA_TEST)];
+        bool multisampled = pass.target == TARGET_MAIN && samples > 1;
+        k.samples = multisampled ? samples : 1;
+        k.alphacoverage = multisampled && caps[capindex(GL_SAMPLE_ALPHA_TO_COVERAGE)] && caps[capindex(GL_ALPHA_TEST)];
         k.blend = !picking && caps[capindex(GL_BLEND)];
         k.srcblend = k.blend ? packblend(blendsrc) : 0;
         k.dstblend = k.blend ? packblend(blenddst) : 0;
@@ -1193,6 +1586,29 @@ struct sdlgpubackend : gfxdevice
         k.depthwrite = k.depthtest && depthwrite;
         k.cull = caps[capindex(GL_CULL_FACE)] && k.topology != SDL_GPU_PRIMITIVETYPE_LINELIST ? (cullmode == GL_FRONT ? 1 : (cullmode == GL_BACK ? 2 : 0)) : 0;
         if(caps[capindex(GL_POLYGON_OFFSET_FILL)]) { k.depthbias = 1; k.biasfactor = offsetfactor; k.biasunits = offsetunits; }
+        if(caps[capindex(GL_STENCIL_TEST)] && stencilbitsv && !picking)
+        {
+            k.stenciltest = 1;
+            k.stencilmask = uchar(stencilmaskv);
+            loopi(2)
+            {
+                uchar *f = i ? k.sback : k.sfront;
+                f[0] = uchar(stencilstate[i][0] - GL_NEVER);
+                loopj(3) f[1+j] = stencilcode(stencilstate[i][1+j]);
+            }
+        }
+        d.stencilref = clamp(int(stencilrefv), 0, 255);
+        // the shader variant with texture matrices and projective coordinates: a unit with a texture matrix that isn't
+        // the identity (only the water's reflection lookup has one), or four texture coordinates per vertex
+        loopi(2) if(texenabled[i])
+        {
+            const float *m = stacks[2+i][stackpos[2+i]].v;
+            int a = i && k.attrs[ATTR_TC1] ? ATTR_TC1 : ATTR_TC;
+            bool identity = true;
+            loopj(16) if(m[j] != ((j%5) == 0 ? 1.0f : 0.0f)) { identity = false; break; }
+            if(!identity || k.attrs[a] == SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4) k.texmatrix = 1;
+        }
+        d.texmatrix = k.texmatrix;
         d.pipeline = getpipeline(k);
         if(d.pipeline < 0) { draws.pop(); return; }
 
@@ -1221,6 +1637,8 @@ struct sdlgpubackend : gfxdevice
         memcpy(d.vs.mvp, mvp.v, sizeof(d.vs.mvp));
         memcpy(d.vs.mv, mv.v, sizeof(d.vs.mv));
         loopi(4) d.vs.color[i] = curcolor[i];
+        memcpy(d.vs.tex0, stacks[2][stackpos[2]].v, sizeof(d.vs.tex0));
+        memcpy(d.vs.tex1, stacks[3][stackpos[3]].v, sizeof(d.vs.tex1));
         loopi(4) d.fs.fogcolor[i] = fogcolor[i];
         d.fs.fog[0] = fogend;
         d.fs.fog[1] = fogend != fogstart ? 1.0f/(fogend - fogstart) : 0;
@@ -1233,6 +1651,14 @@ struct sdlgpubackend : gfxdevice
         d.viewport[1] = th - (viewportv[1] + viewportv[3]);
         d.viewport[2] = viewportv[2];
         d.viewport[3] = viewportv[3];
+        if(caps[capindex(GL_SCISSOR_TEST)])
+        {
+            int x1 = max(scissorv[0], 0), y1 = max(th - (scissorv[1] + scissorv[3]), 0),
+                x2 = min(scissorv[0] + scissorv[2], picking ? 1 : targetw), y2 = min(th - scissorv[1], th);
+            d.scissor[0] = x1; d.scissor[1] = y1; d.scissor[2] = max(x2 - x1, 0); d.scissor[3] = max(y2 - y1, 0);
+        }
+        else { d.scissor[0] = d.scissor[1] = 0; d.scissor[2] = picking ? 1 : targetw; d.scissor[3] = th; }
+        if(!d.scissor[2] || !d.scissor[3]) { draws.pop(); return; }
         pass.numdraws++;
     }
 
@@ -1443,6 +1869,25 @@ struct sdlgpubackend : gfxdevice
         SDL_SubmitGPUCommandBuffer(cmd);
     }
 
+    // The arena and upload buffers grow for the biggest frame (the minimap draws the whole map: 4-8 MB) and are cycled
+    // every frame; kept that large, they made every later frame up to 30% slower when the GPU is the limit (more
+    // frames in flight hold more large buffers). So after 100 frames that would fit in a quarter of them, they're
+    // released and grow again from 1 MB.
+    void shrinkbuffers()
+    {
+        const uint minsize = 1u<<20;
+        if(arenavbsize <= minsize && arenaibsize <= minsize && frameuploadsize <= minsize) { smallframes = 0; return; }
+        bool small = uint(vertexarena.length())*4 <= max(arenavbsize, minsize) && uint(indexarena.length()*sizeof(uint))*4 <= max(arenaibsize, minsize) &&
+                     lastuploadsize*4 <= max(frameuploadsize, minsize);
+        if(!small) { smallframes = 0; return; }
+        if(++smallframes < 100) return;
+        smallframes = 0;
+        if(arenavbsize > minsize && arenavb) { SDL_ReleaseGPUBuffer(dev, arenavb); arenavb = NULL; arenavbsize = 0; }
+        if(arenaibsize > minsize && arenaib) { SDL_ReleaseGPUBuffer(dev, arenaib); arenaib = NULL; arenaibsize = 0; }
+        if(frameuploadsize > minsize && frameupload) { SDL_ReleaseGPUTransferBuffer(dev, frameupload); frameupload = NULL; frameuploadsize = 0; }
+        if(gpudebug) conoutf("SDL GPU: arena and upload buffers shrunk");
+    }
+
     SDL_GPUBuffer *growbuffer(SDL_GPUBuffer *buf, uint &cursize, uint need)
     {
         if(buf && cursize >= need) return buf;
@@ -1474,6 +1919,7 @@ struct sdlgpubackend : gfxdevice
         if(pendinguploads.empty()) return;
         const pendingupload &last = pendinguploads.last();
         uint total = last.offset + last.size;
+        lastuploadsize = total;
         if(!frameupload || frameuploadsize < total)
         {
             if(frameupload) SDL_ReleaseGPUTransferBuffer(dev, frameupload);
@@ -1509,36 +1955,59 @@ struct sdlgpubackend : gfxdevice
         memset(&ct, 0, sizeof(ct));
         SDL_GPUDepthStencilTargetInfo dt;
         memset(&dt, 0, sizeof(dt));
-        bool pick = p.target == TARGET_PICK;
-        ct.texture = pick ? pickcolor : (msaatex ? msaatex : colortex);
+        if(p.target == TARGET_FXAA)
+        {
+            float params[4] = { 1.0f/targetw, 1.0f/targeth, 0, 0 };
+            runpostpass(cmd, fxaapipe, colortex, posttex, params);
+            return;
+        }
+        bool pick = p.target == TARGET_PICK, post = p.target == TARGET_POST;
+        ct.texture = pick ? pickcolor : (post ? posttex : (msaatex ? msaatex : colortex));
         ct.load_op = p.clearcolor ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         ct.clear_color.r = p.color[0]; ct.clear_color.g = p.color[1]; ct.clear_color.b = p.color[2]; ct.clear_color.a = p.color[3];
-        if(!pick && msaatex)
+        if(!pick && !post && msaatex)
         {
             ct.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
             ct.resolve_texture = colortex;
         }
         else ct.store_op = SDL_GPU_STOREOP_STORE;
-        dt.texture = pick ? pickdepth : depthtex;
-        dt.clear_depth = 1;
+        dt.texture = pick ? pickdepth : (post ? postdepth : depthtex);
+        dt.clear_depth = p.depthclear;
         dt.load_op = p.cleardepth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         dt.store_op = SDL_GPU_STOREOP_STORE; // (not storing the last pass's depth measured no faster: 8 interleaved pairs)
-        dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-        dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        if(stencilbitsv)
+        {
+            dt.clear_stencil = Uint8(p.stencilclear);
+            dt.stencil_load_op = p.clearstencil ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+            dt.stencil_store_op = SDL_GPU_STOREOP_STORE;
+        }
+        else
+        {
+            dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+            dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+        }
         SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
         if(!rp) return;
-        int lastpipeline = -1, lastsampler[2] = { -1, -1 };
+        int lastpipeline = -1, lastsampler[2] = { -1, -1 }, laststencilref = -1;
         GLuint lasttex[2] = { ~0U, ~0U };
         float lastvp[4] = { -1, -1, -1, -1 };
+        int lastsc[4] = { -1, -1, -1, -1 };
         loopi(p.numdraws)
         {
             gpudraw &d = draws[p.firstdraw + i];
             if(d.pipeline != lastpipeline) { SDL_BindGPUGraphicsPipeline(rp, pipelines[d.pipeline]); lastpipeline = d.pipeline; }
+            if(stencilbitsv && d.stencilref != laststencilref) { SDL_SetGPUStencilReference(rp, Uint8(d.stencilref)); laststencilref = d.stencilref; }
             if(memcmp(lastvp, d.viewport, sizeof(lastvp)))
             {
                 SDL_GPUViewport vp = { d.viewport[0], d.viewport[1], d.viewport[2], d.viewport[3], 0, 1 };
                 SDL_SetGPUViewport(rp, &vp);
                 memcpy(lastvp, d.viewport, sizeof(lastvp));
+            }
+            if(memcmp(lastsc, d.scissor, sizeof(lastsc)))
+            {
+                SDL_Rect r = { d.scissor[0], d.scissor[1], d.scissor[2], d.scissor[3] };
+                SDL_SetGPUScissor(rp, &r);
+                memcpy(lastsc, d.scissor, sizeof(lastsc));
             }
             loopj(NUMATTRS) if(d.vbsrc[j])
             {
@@ -1559,11 +2028,31 @@ struct sdlgpubackend : gfxdevice
                 }
                 SDL_BindGPUFragmentSamplers(rp, 0, tsb, 2);
             }
-            SDL_PushGPUVertexUniformData(cmd, 0, &d.vs, sizeof(d.vs));
+            SDL_PushGPUVertexUniformData(cmd, 0, &d.vs, d.texmatrix ? sizeof(d.vs) : offsetof(vsuniforms, tex0));
             SDL_PushGPUFragmentUniformData(cmd, 0, &d.fs, sizeof(d.fs));
             SDL_DrawGPUIndexedPrimitives(rp, d.numindices, 1, d.firstindex, 0, 0);
         }
         SDL_EndGPURenderPass(rp);
+
+        // copies of the frame into textures (glCopyTexSubImage2D), flipped so the rows are bottom-up as in GL
+        loopi(p.numcopies)
+        {
+            const gpucopy &c = copies[p.firstcopy + i];
+            if(c.tex >= (GLuint)textures.length() || !textures[c.tex].tex) continue;
+            gputexture &t = textures[c.tex];
+            int w = min(c.w, min(targetw - c.sx, t.w - c.dx)), h = min(c.h, min(targeth - c.sy, t.h - c.dy));
+            if(w <= 0 || h <= 0 || c.sx < 0 || c.sy < 0 || c.dx < 0 || c.dy < 0) continue;
+            SDL_GPUBlitInfo bi;
+            memset(&bi, 0, sizeof(bi));
+            bi.source.texture = post ? posttex : colortex;
+            bi.source.x = c.sx; bi.source.y = targeth - (c.sy + h); bi.source.w = w; bi.source.h = h;
+            bi.destination.texture = t.tex;
+            bi.destination.x = c.dx; bi.destination.y = c.dy; bi.destination.w = w; bi.destination.h = h;
+            bi.load_op = SDL_GPU_LOADOP_LOAD;
+            bi.flip_mode = SDL_FLIP_VERTICAL;
+            bi.filter = SDL_GPU_FILTER_NEAREST;
+            SDL_BlitGPUTexture(cmd, &bi);
+        }
     }
 
     void present() { submitframe(true); }
@@ -1596,6 +2085,7 @@ struct sdlgpubackend : gfxdevice
             upload(b.buf, b.data.getbuf(), b.data.length());
             b.dirty = false;
         }
+        shrinkbuffers();
         if(vertexarena.length()) { arenavb = growbuffer(arenavb, arenavbsize, vertexarena.length()); upload(arenavb, vertexarena.getbuf(), vertexarena.length()); }
         if(indexarena.length()) { arenaib = growbuffer(arenaib, arenaibsize, indexarena.length()*sizeof(uint)); upload(arenaib, indexarena.getbuf(), indexarena.length()*sizeof(uint)); }
         flushbufferuploads(copy);
@@ -1619,15 +2109,42 @@ struct sdlgpubackend : gfxdevice
             if(!cmd) { recording = false; return; }
         }
 
-        // 2. the main pass and presentation
-        loopv(passes) if(passes[i].target == TARGET_MAIN) runpass(cmd, passes[i]);
+        if(gpudebug >= 2 && framecount%500 == 0)
+        {
+            int npasses = 0, ndraws = 0, nblended = 0;
+            loopv(passes) if(passes[i].target != TARGET_PICK)
+            {
+                npasses++;
+                ndraws += passes[i].numdraws;
+                loopj(passes[i].numdraws) if(pipelinekeys[draws[passes[i].firstdraw + j].pipeline].blend) nblended++;
+            }
+            conoutf("SDL GPU frame %u: %d passes, %d draws (%d blended, %d in total), %d KB vertices, %d KB indices, %d copies; "
+                "arena buffers %u/%u KB, upload buffer %u KB", framecount, npasses, ndraws, nblended, draws.length(),
+                vertexarena.length()/1024, indexarena.length()*4/1024, copies.length(), arenavbsize/1024, arenaibsize/1024, frameuploadsize/1024);
+        }
+
+        // 2. the main passes (scene, FXAA, HUD), gamma and presentation
+        if(postfxactive) setuppostrargets();
+        loopv(passes) if(passes[i].target != TARGET_PICK) runpass(cmd, passes[i]);
+        SDL_GPUTexture *final = postfxactive ? posttex : colortex;
+        if(gammaexponent != 1)
+        {
+            // into the other texture, so screenshots include it as with GL (where the gamma pass draws into the back buffer)
+            if(!gammafs) gammafs = makepostshader("fgamma", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            if(!gammapipe) gammapipe = postpipeline(gammafs, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
+            if(final == colortex) setuppostrargets();
+            SDL_GPUTexture *dst = final == colortex ? posttex : colortex;
+            float params[4] = { gammaexponent, 0, 0, 0 };
+            if(gammapipe) { runpostpass(cmd, gammapipe, final, dst, params); final = dst; }
+        }
+        lastfinal = final;
         SDL_GPUTexture *swap = NULL;
         Uint32 sw = 0, sh = 0;
         if(show && !benchnopresent && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, window, &swap, &sw, &sh) && swap)
         {
             SDL_GPUBlitInfo bi;
             memset(&bi, 0, sizeof(bi));
-            bi.source.texture = colortex; bi.source.w = targetw; bi.source.h = targeth;
+            bi.source.texture = final; bi.source.w = targetw; bi.source.h = targeth;
             bi.destination.texture = swap; bi.destination.w = sw; bi.destination.h = sh;
             bi.load_op = SDL_GPU_LOADOP_DONT_CARE;
             bi.filter = SDL_GPU_FILTER_NEAREST;
@@ -1650,7 +2167,7 @@ struct sdlgpubackend : gfxdevice
         SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
         SDL_GPUTextureRegion src;
         memset(&src, 0, sizeof(src));
-        src.texture = colortex; src.x = x; src.y = targeth - (y + h); src.w = w; src.h = h; src.d = 1;
+        src.texture = lastfinal ? lastfinal : colortex; src.x = x; src.y = targeth - (y + h); src.w = w; src.h = h; src.d = 1;
         SDL_GPUTextureTransferInfo dst = { tb, 0, (Uint32)w, (Uint32)h };
         SDL_DownloadFromGPUTexture(copy, &src, &dst);
         SDL_EndGPUCopyPass(copy);

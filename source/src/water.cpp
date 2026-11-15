@@ -148,8 +148,8 @@ void setprojtexmatrix()
     glmatrixf projtex = mvpmatrix;
     projtex.projective();
 
-    glMatrixMode(GL_TEXTURE);
-    glLoadMatrixf(projtex.v);
+    gfx->matrixmode(GL_TEXTURE);
+    gfx->loadmatrix(projtex.v);
 }
 
 void setupmultitexrefract(GLuint reflecttex, GLuint refracttex)
@@ -158,18 +158,18 @@ void setupmultitexrefract(GLuint reflecttex, GLuint refracttex)
 
     colortmu(0, hdr.watercolor[0]/255.0f, hdr.watercolor[1]/255.0f, hdr.watercolor[2]/255.0f, hdr.watercolor[3]/255.0f);
 
-    glBindTexture(GL_TEXTURE_2D, refracttex);
+    gfx->bindtexture(GL_TEXTURE_2D, refracttex);
     setprojtexmatrix();
 
-    glActiveTexture_(GL_TEXTURE1_ARB);
-    glEnable(GL_TEXTURE_2D);
+    gfx->activetexture(GL_TEXTURE1_ARB);
+    gfx->enable(GL_TEXTURE_2D);
 
     setuptmu(1, "P , T @ C~a");
 
-    glBindTexture(GL_TEXTURE_2D, reflecttex);
+    gfx->bindtexture(GL_TEXTURE_2D, reflecttex);
     setprojtexmatrix();
 
-    glActiveTexture_(GL_TEXTURE0_ARB);
+    gfx->activetexture(GL_TEXTURE0_ARB);
 }
 
 void setupmultitexreflect(GLuint reflecttex)
@@ -179,24 +179,24 @@ void setupmultitexreflect(GLuint reflecttex)
     float a = hdr.watercolor[3]/255.0f;
     colortmu(0, hdr.watercolor[0]/255.0f*a, hdr.watercolor[1]/255.0f*a, hdr.watercolor[2]/255.0f*a, 1.0f-a);
 
-    glBindTexture(GL_TEXTURE_2D, reflecttex);
+    gfx->bindtexture(GL_TEXTURE_2D, reflecttex);
     setprojtexmatrix();
 }
 
 void cleanupmultitex(GLuint reflecttex, GLuint refracttex)
 {
     resettmu(0);
-    glLoadIdentity();
+    gfx->loadidentity();
 
     if(refracttex)
     {
-        glActiveTexture_(GL_TEXTURE1_ARB);
-        glDisable(GL_TEXTURE_2D);
+        gfx->activetexture(GL_TEXTURE1_ARB);
+        gfx->disable(GL_TEXTURE_2D);
         resettmu(1);
-        glLoadIdentity();
-        glActiveTexture_(GL_TEXTURE0_ARB);
+        gfx->loadidentity();
+        gfx->activetexture(GL_TEXTURE0_ARB);
     }
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_MODELVIEW);
 }
 
 VARP(mtwater, 0, 1, 1);
@@ -225,12 +225,12 @@ int renderwater(float hf, GLuint reflecttex, GLuint refracttex)
         else
         {
             setupmultitexreflect(reflecttex);
-            glDepthMask(GL_FALSE);
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+            gfx->depthmask(GL_FALSE);
+            gfx->enable(GL_BLEND);
+            gfx->blendfunc(GL_ONE, GL_SRC_ALPHA);
             renderwaterstrips(vertwtc, hf, t);
-            glDisable(GL_BLEND);
-            glDepthMask(GL_TRUE);
+            gfx->disable(GL_BLEND);
+            gfx->depthmask(GL_TRUE);
         }
         cleanupmultitex(reflecttex, refracttex);
 
@@ -241,11 +241,11 @@ int renderwater(float hf, GLuint reflecttex, GLuint refracttex)
 
     if(!refracttex)
     {
-        glDisable(GL_TEXTURE_2D);
-        glEnable(GL_BLEND);
+        gfx->disable(GL_TEXTURE_2D);
+        gfx->enable(GL_BLEND);
     }
-    glDepthMask(GL_FALSE);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    gfx->depthmask(GL_FALSE);
+    gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     varray::enable();
 
@@ -253,25 +253,25 @@ int renderwater(float hf, GLuint reflecttex, GLuint refracttex)
     {
         if(!refracttex)
         {
-            glColor4ubv(hdr.watercolor);
+            gfx->color4ubv(hdr.watercolor);
             renderwaterstrips(vertw, hf, t);
 
-            glEnable(GL_TEXTURE_2D);
+            gfx->enable(GL_TEXTURE_2D);
         }
 
         setprojtexmatrix();
 
-        glBindTexture(GL_TEXTURE_2D, refracttex ? refracttex : reflecttex);
+        gfx->bindtexture(GL_TEXTURE_2D, refracttex ? refracttex : reflecttex);
     }
 
     if(refracttex)
     {
-        glColor3f(1, 1, 1);
+        gfx->color3f(1, 1, 1);
         renderwaterstrips(vertwt, hf, t);
-        glEnable(GL_BLEND);
+        gfx->enable(GL_BLEND);
 
-        glBindTexture(GL_TEXTURE_2D, reflecttex);
-        glDepthMask(GL_TRUE);
+        gfx->bindtexture(GL_TEXTURE_2D, reflecttex);
+        gfx->depthmask(GL_TRUE);
     }
     if(reflecttex) { renderwaterstrips(vertwtc, hf, t); }
     else { renderwaterstrips(vertwc, hf, t); }
@@ -280,13 +280,13 @@ int renderwater(float hf, GLuint reflecttex, GLuint refracttex)
 
     if(reflecttex)
     {
-        glLoadIdentity();
-        glMatrixMode(GL_MODELVIEW);
+        gfx->loadidentity();
+        gfx->matrixmode(GL_MODELVIEW);
     }
-    else glEnable(GL_TEXTURE_2D);
+    else gfx->enable(GL_TEXTURE_2D);
 
-    glDisable(GL_BLEND);
-    if(!refracttex) glDepthMask(GL_TRUE);
+    gfx->disable(GL_BLEND);
+    if(!refracttex) gfx->depthmask(GL_TRUE);
 
     return nquads;
 }

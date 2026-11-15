@@ -80,7 +80,9 @@ void gl_checkextensions()
     {
         // the GPU backend implements the paths the GL renderer takes with these (gfx_sdlgpu.cpp)
         hasTE = hasMT = hasMDA = hasDRE = hasVBO = hasFBO = hasAF = true;
-        hasPBO = hasstencil = hasST2 = hasSTW = hasSTS = hasDBF = false;
+        hasPBO = hasST2 = hasDBF = false;
+        hasSTS = hasSTW = true; // (separate front and back stencil, wrapping increments)
+        hasstencil = gfx->getstencilbits() >= 8;
         hwmaxaniso = 16;
         conoutf("Renderer: %s", gfx->name());
         return;
@@ -757,7 +759,7 @@ static void cleanupreflectfbos()
 
 static bool bindreflectfbo(int size, bool refract) // false: render into the back buffer and copy, as before
 {
-    if(!hasFBO || !reflectfbo) return false;
+    if(!hasFBO || !reflectfbo || !gfx_legacygl()) return false; // (the GPU backend renders and copies)
     GLuint &fbo = reflectfbos[refract ? 1 : 0];
     if(!fbo)
     {
@@ -798,8 +800,8 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
     while(size > sizelimit) size /= 2;
     if(size!=reflectlastsize)
     {
-        if(reflecttex) glDeleteTextures(1, &reflecttex);
-        if(refracttex) glDeleteTextures(1, &refracttex);
+        if(reflecttex) gfx->deletetextures(1, &reflecttex);
+        if(refracttex) gfx->deletetextures(1, &refracttex);
         reflecttex = refracttex = 0;
     }
     if(!reflecttex || (waterrefract && !refracttex))
@@ -810,12 +812,12 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
         GLenum format = hasFBO && reflectfbo ? GL_RGBA : GL_RGB;
         if(!reflecttex)
         {
-            glGenTextures(1, &reflecttex);
+            gfx->gentextures(1, &reflecttex);
             createtexture(reflecttex, size, size, NULL, 3, false, false, format);
         }
         if(!refracttex)
         {
-            glGenTextures(1, &refracttex);
+            gfx->gentextures(1, &refracttex);
             createtexture(refracttex, size, size, NULL, 3, false, false, format);
         }
         reflectlastsize = size;
@@ -831,12 +833,12 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
         sh = int(ceil((wsy2+1)*0.5f*size)) - sy;
     }
     bool usefbo = bindreflectfbo(size, refract);
-    glScissor(sx, sy, sw, sh);
-    glEnable(GL_SCISSOR_TEST);
+    gfx->scissor(sx, sy, sw, sh);
+    gfx->enable(GL_SCISSOR_TEST);
 
-    if(!refract) glCullFace(GL_BACK);
-    glViewport(0, 0, size, size);
-    glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
+    if(!refract) gfx->cullface(GL_BACK);
+    gfx->viewport(0, 0, size, size);
+    gfx->clear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
 
     resetcubes();
 
@@ -845,37 +847,37 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
 
     setupstrips();
 
-    glEnable(GL_TEXTURE_2D);
+    gfx->enable(GL_TEXTURE_2D);
 
-    glPushMatrix();
+    gfx->pushmatrix();
     if(!refract)
     {
-        glTranslatef(0, 0, 2*hf);
-        glScalef(1, 1, -1);
+        gfx->translate(0, 0, 2*hf);
+        gfx->scale(1, 1, -1);
     }
 
     genclipmatrix(0, 0, -1, 0.1f*reflectclip+hf);
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadMatrixf(clipmatrix.v);
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->pushmatrix();
+    gfx->loadmatrix(clipmatrix.v);
+    gfx->matrixmode(GL_MODELVIEW);
 
     renderstripssky();
 
-    glPushMatrix();
-    glLoadIdentity();
-    glRotatef(camera1->pitch, -1, 0, 0);
-    glRotatef(camera1->yaw,   0, 1, 0);
-    glRotatef(90, 1, 0, 0);
-    if(!refract) glScalef(1, 1, -1);
-    glColor3f(1, 1, 1);
-    glDisable(GL_FOG);
-    glDepthFunc(GL_GREATER);
+    gfx->pushmatrix();
+    gfx->loadidentity();
+    gfx->rotate(camera1->pitch, -1, 0, 0);
+    gfx->rotate(camera1->yaw,   0, 1, 0);
+    gfx->rotate(90, 1, 0, 0);
+    if(!refract) gfx->scale(1, 1, -1);
+    gfx->color3f(1, 1, 1);
+    gfx->disable(GL_FOG);
+    gfx->depthfunc(GL_GREATER);
     if(!refracting) skyfloor = max(skyfloor, hf);
     draw_envbox(fog*4/3);
-    glDepthFunc(GL_LESS);
-    glEnable(GL_FOG);
-    glPopMatrix();
+    gfx->depthfunc(GL_LESS);
+    gfx->enable(GL_FOG);
+    gfx->popmatrix();
 
     setuptmu(0, "T * P x 2");
 
@@ -888,45 +890,45 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
 
     render_particles(-1);
 
-    if(refract) glLoadIdentity();
-    glMatrixMode(GL_PROJECTION);
+    if(refract) gfx->loadidentity();
+    gfx->matrixmode(GL_PROJECTION);
     extern int mtwater;
     if(refract && (!mtwater || maxtmus<2))
     {
-        glLoadIdentity();
-        glOrtho(0, 1, 0, 1, -1, 1);
-        glDisable(GL_TEXTURE_2D);
-        glDisable(GL_DEPTH_TEST);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glColor4ubv(hdr.watercolor);
-        glBegin(GL_TRIANGLE_STRIP);
-        glVertex2f(0, 1);
-        glVertex2f(1, 1);
-        glVertex2f(0, 0);
-        glVertex2f(1, 0);
-        glEnd();
-        glDisable(GL_BLEND);
-        glEnable(GL_TEXTURE_2D);
-        glEnable(GL_DEPTH_TEST);
+        gfx->loadidentity();
+        gfx->ortho(0, 1, 0, 1, -1, 1);
+        gfx->disable(GL_TEXTURE_2D);
+        gfx->disable(GL_DEPTH_TEST);
+        gfx->enable(GL_BLEND);
+        gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gfx->color4ubv(hdr.watercolor);
+        gfx->begin(GL_TRIANGLE_STRIP);
+        gfx->vertex2f(0, 1);
+        gfx->vertex2f(1, 1);
+        gfx->vertex2f(0, 0);
+        gfx->vertex2f(1, 0);
+        gfx->end();
+        gfx->disable(GL_BLEND);
+        gfx->enable(GL_TEXTURE_2D);
+        gfx->enable(GL_DEPTH_TEST);
     }
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
+    gfx->popmatrix();
+    gfx->matrixmode(GL_MODELVIEW);
+    gfx->popmatrix();
 
-    if(!refract) glCullFace(GL_FRONT);
-    glViewport(0, 0, w, h);
+    if(!refract) gfx->cullface(GL_FRONT);
+    gfx->viewport(0, 0, w, h);
 
-    glDisable(GL_SCISSOR_TEST);
+    gfx->disable(GL_SCISSOR_TEST);
 
     if(usefbo) glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
     else
     {
-        glBindTexture(GL_TEXTURE_2D, refract ? refracttex : reflecttex);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, sx, sy, sx, sy, sw, sh);
+        gfx->bindtexture(GL_TEXTURE_2D, refract ? refracttex : reflecttex);
+        gfx->copytexsubimage2d(GL_TEXTURE_2D, 0, sx, sy, sx, sy, sw, sh);
     }
 
-    glDisable(GL_TEXTURE_2D);
+    gfx->disable(GL_TEXTURE_2D);
 
     reflecting = refracting = false;
 }
@@ -970,12 +972,12 @@ void drawminimap(int w, int h)
     while(size > sizelimit) size /= 2;
     if(size!=minimaplastsize && minimaptex)
     {
-        glDeleteTextures(1, &minimaptex);
+        gfx->deletetextures(1, &minimaptex);
         minimaptex = 0;
     }
     if(!minimaptex)
     {
-        glGenTextures(1, &minimaptex);
+        gfx->gentextures(1, &minimaptex);
         createtexture(minimaptex, size, size, NULL, 3, false, false, GL_RGB);
         minimaplastsize = size;
     }
@@ -996,28 +998,28 @@ void drawminimap(int w, int h)
     camera1->yaw = 0;
 
     float orthd = gdim/2.0f;
-    glViewport(0, 0, size, size);
+    gfx->viewport(0, 0, size, size);
 
-    glClearDepth(0.0);
-    glClearColor(0, 0, 0, 0);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-orthd, orthd, -orthd, orthd, 0, (clmapdims.maxceil - clmapdims.minfloor) + 2); // depth of map +2 covered
-    glScalef(1, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glCullFace(GL_BACK);
-    glDisable(GL_FOG);
-    glEnable(GL_TEXTURE_2D);
+    gfx->cleardepth(0.0);
+    gfx->clearcolor(0, 0, 0, 0);
+    gfx->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->loadidentity();
+    gfx->ortho(-orthd, orthd, -orthd, orthd, 0, (clmapdims.maxceil - clmapdims.minfloor) + 2); // depth of map +2 covered
+    gfx->scale(1, -1, 1);
+    gfx->matrixmode(GL_MODELVIEW);
+    gfx->cullface(GL_BACK);
+    gfx->disable(GL_FOG);
+    gfx->enable(GL_TEXTURE_2D);
     transplayer();
     resetcubes();
     render_world(camera1->o.x, camera1->o.y, camera1->o.z, 1.0f,
             (int)camera1->yaw, (int)camera1->pitch, 90.0f, 90.0f, size, size);
     setupstrips();
     setuptmu(0, "T * P x 2");
-    glDepthFunc(GL_ALWAYS);
+    gfx->depthfunc(GL_ALWAYS);
     renderstrips();
-    glDepthFunc(GL_LESS);
+    gfx->depthfunc(GL_LESS);
     rendermapmodels();
     renderzones(clmapdims.maxceil);
     resettmu(0);
@@ -1026,29 +1028,29 @@ void drawminimap(int w, int h)
 
     //draw a black border to prevent the minimap texture edges from bleeding in radarview
     GLfloat prevLineWidth;
-    glGetFloatv(GL_LINE_WIDTH, &prevLineWidth);
-    glDisable(GL_BLEND);
-    glColor3f(0, 0, 0);
-    glLineWidth(2.0f);
-    glBegin(GL_LINE_LOOP);
-        glVertex3f(clmapdims.x1 + 0.02f,                   clmapdims.y1 + 0.02f,                   clmapdims.maxceil);
-        glVertex3f(clmapdims.x1 + clmapdims.xspan - 0.02f, clmapdims.y1 + 0.02f,                   clmapdims.maxceil);
-        glVertex3f(clmapdims.x1 + clmapdims.xspan - 0.02f, clmapdims.y1 + clmapdims.yspan - 0.02f, clmapdims.maxceil);
-        glVertex3f(clmapdims.x1 + 0.02f,                   clmapdims.y1 + clmapdims.yspan - 0.02f, clmapdims.maxceil);
-    glEnd();
-    glLineWidth(prevLineWidth);
-    glEnable(GL_BLEND);
+    gfx->getfloatv(GL_LINE_WIDTH, &prevLineWidth);
+    gfx->disable(GL_BLEND);
+    gfx->color3f(0, 0, 0);
+    gfx->linewidth(2.0f);
+    gfx->begin(GL_LINE_LOOP);
+        gfx->vertex3f(clmapdims.x1 + 0.02f,                   clmapdims.y1 + 0.02f,                   clmapdims.maxceil);
+        gfx->vertex3f(clmapdims.x1 + clmapdims.xspan - 0.02f, clmapdims.y1 + 0.02f,                   clmapdims.maxceil);
+        gfx->vertex3f(clmapdims.x1 + clmapdims.xspan - 0.02f, clmapdims.y1 + clmapdims.yspan - 0.02f, clmapdims.maxceil);
+        gfx->vertex3f(clmapdims.x1 + 0.02f,                   clmapdims.y1 + clmapdims.yspan - 0.02f, clmapdims.maxceil);
+    gfx->end();
+    gfx->linewidth(prevLineWidth);
+    gfx->enable(GL_BLEND);
 
     camera1 = oldcam;
     minimap = false;
-    glBindTexture(GL_TEXTURE_2D, minimaptex);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
+    gfx->bindtexture(GL_TEXTURE_2D, minimaptex);
+    gfx->copytexsubimage2d(GL_TEXTURE_2D, 0, 0, 0, 0, 0, size, size);
     minimapdirty = false;
-    glCullFace(GL_FRONT);
-    glEnable(GL_FOG);
-    glDisable(GL_TEXTURE_2D);
-    glViewport(0, 0, w, h);
-    glClearDepth(1.0);
+    gfx->cullface(GL_FRONT);
+    gfx->enable(GL_FOG);
+    gfx->disable(GL_TEXTURE_2D);
+    gfx->viewport(0, 0, w, h);
+    gfx->cleardepth(1.0);
 }
 
 static void cleanupdepthread();
@@ -1344,10 +1346,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 {
     extern int mapoverride_nostencilshadows, mapoverride_nowaterreflect;
     effective_stencilshadow = mapoverride_nostencilshadows && !ignoreoverride_nostencilshadows ? 0 : stencilshadow;
-    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect) && gfx_legacygl() && !gpuparity;
+    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect);
 
     dodynlights();
-    if(gfx_legacygl() && !gpuparity) drawminimap(w, h); // (not ported to the GPU backend yet)
+    drawminimap(w, h);
 
     recomputecamera();
 
@@ -1473,9 +1475,8 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     render_particles(curtime, PT_DECAL_MASK);
 
-    // (water, the editor overlay and post-processing aren't ported to the GPU backend yet)
-    bool legacy = gfx_legacygl() && !gpuparity;
-    int nquads = legacy ? renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex) : 0;
+    int nquads = renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex);
+    bool legacy = gfx_legacygl() && !gpuparity; // (the editor overlay isn't ported to the GPU backend yet)
 
     render_particles(curtime, ~PT_DECAL_MASK);
     rpmark(RP_EFFECTS);
@@ -1498,12 +1499,12 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     tagclipcubes.setsize(0);
 
     extern void renderpostfxscene(int w, int h), renderpostfxfinal(int w, int h);
-    if(legacy) renderpostfxscene(w, h); // FXAA: the 3D scene only, the HUD stays sharp
+    renderpostfxscene(w, h); // FXAA: the 3D scene only, the HUD stays sharp
 
     extern vector<vertex> verts;
     gl_drawhud(w, h, int(curfps + 0.5f), nquads, verts.length(), underwater, elapsed);
 
-    if(legacy) renderpostfxfinal(w, h); // gamma: everything
+    renderpostfxfinal(w, h); // gamma: everything
 
     gfx->enable(GL_CULL_FACE);
     if(!isoverview) gfx->enable(GL_FOG);

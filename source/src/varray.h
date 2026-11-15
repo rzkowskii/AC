@@ -132,26 +132,26 @@ namespace varray
         switch(a.type)
         {
             case ATTRIB_VERTEX:
-                if(!(enabled&a.type)) glEnableClientState(GL_VERTEX_ARRAY);
-                glVertexPointer(a.size, a.format, vertexsize, buf);
+                if(!(enabled&a.type)) gfx->enableclientstate(GL_VERTEX_ARRAY);
+                gfx->vertexpointer(a.size, a.format, vertexsize, buf);
                 break;
             case ATTRIB_COLOR:
-                if(!(enabled&a.type)) glEnableClientState(GL_COLOR_ARRAY);
-                glColorPointer(a.size, a.format, vertexsize, buf);
+                if(!(enabled&a.type)) gfx->enableclientstate(GL_COLOR_ARRAY);
+                gfx->colorpointer(a.size, a.format, vertexsize, buf);
                 break;
             case ATTRIB_NORMAL:
-                if(!(enabled&a.type)) glEnableClientState(GL_NORMAL_ARRAY);
-                glNormalPointer(a.format, vertexsize, buf);
+                if(!(enabled&a.type)) gfx->enableclientstate(GL_NORMAL_ARRAY);
+                gfx->normalpointer(a.format, vertexsize, buf);
                 break;
             case ATTRIB_TEXCOORD0:
-                if(!(enabled&a.type)) glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-                glTexCoordPointer(a.size, a.format, vertexsize, buf);
+                if(!(enabled&a.type)) gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+                gfx->texcoordpointer(a.size, a.format, vertexsize, buf);
                 break;
             case ATTRIB_TEXCOORD1:
-                glClientActiveTexture_(GL_TEXTURE1_ARB);
-                if(!(enabled&a.type)) glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-                glTexCoordPointer(a.size, a.format, vertexsize, buf);
-                glClientActiveTexture_(GL_TEXTURE0_ARB);
+                gfx->clientactivetexture(GL_TEXTURE1_ARB);
+                if(!(enabled&a.type)) gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+                gfx->texcoordpointer(a.size, a.format, vertexsize, buf);
+                gfx->clientactivetexture(GL_TEXTURE0_ARB);
                 break;
         }
         enabled |= a.type;
@@ -162,21 +162,21 @@ namespace varray
         switch(a.type)
         {
             case ATTRIB_VERTEX:
-                glDisableClientState(GL_VERTEX_ARRAY);
+                gfx->disableclientstate(GL_VERTEX_ARRAY);
                 break;
             case ATTRIB_COLOR:
-                glDisableClientState(GL_COLOR_ARRAY);
+                gfx->disableclientstate(GL_COLOR_ARRAY);
                 break;
             case ATTRIB_NORMAL:
-                glDisableClientState(GL_NORMAL_ARRAY);
+                gfx->disableclientstate(GL_NORMAL_ARRAY);
                 break;
             case ATTRIB_TEXCOORD0:
-                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+                gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
                 break;
             case ATTRIB_TEXCOORD1:
-                glClientActiveTexture_(GL_TEXTURE1_ARB);
-                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-                glClientActiveTexture_(GL_TEXTURE0_ARB);
+                gfx->clientactivetexture(GL_TEXTURE1_ARB);
+                gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
+                gfx->clientactivetexture(GL_TEXTURE0_ARB);
                 break;
         }
         enabled &= ~a.type;
@@ -213,7 +213,7 @@ namespace varray
             changedattribs = false;
         }
         int numvertexes = data.length()/vertexsize;
-        glDrawArrays(primtype, 0, numvertexes);
+        gfx->drawarrays(primtype, 0, numvertexes);
         data.setsize(0);
         return numvertexes;
     }
@@ -221,15 +221,15 @@ namespace varray
     void disable()
     {
         if(!enabled) return;
-        if(enabled&ATTRIB_VERTEX) glDisableClientState(GL_VERTEX_ARRAY);
-        if(enabled&ATTRIB_COLOR) glDisableClientState(GL_COLOR_ARRAY);
-        if(enabled&ATTRIB_NORMAL) glDisableClientState(GL_NORMAL_ARRAY);
-        if(enabled&ATTRIB_TEXCOORD0) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        if(enabled&ATTRIB_VERTEX) gfx->disableclientstate(GL_VERTEX_ARRAY);
+        if(enabled&ATTRIB_COLOR) gfx->disableclientstate(GL_COLOR_ARRAY);
+        if(enabled&ATTRIB_NORMAL) gfx->disableclientstate(GL_NORMAL_ARRAY);
+        if(enabled&ATTRIB_TEXCOORD0) gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
         if(enabled&ATTRIB_TEXCOORD1)
         {
-            glClientActiveTexture_(GL_TEXTURE1_ARB);
-            glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-            glClientActiveTexture_(GL_TEXTURE0_ARB);
+            gfx->clientactivetexture(GL_TEXTURE1_ARB);
+            gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
+            gfx->clientactivetexture(GL_TEXTURE0_ARB);
         }
         enabled = 0;
     }

@@ -328,18 +328,23 @@ static void drawpass(postprogram &p, int w, int h, float param)
 // can the gamma setting be applied by the shader? (otherwise the hardware gamma ramp is used)
 bool postfxgamma()
 {
+    if(!gfx_legacygl()) return gammashader != 0; // (the GPU backend has its own pass)
     return gammashader && checkglsl() && !gammaprog.failed;
 }
 
 void renderpostfxscene(int w, int h) // after the 3D scene, before the HUD
 {
-    if(fxaa) drawpass(fxaaprog, w, h, 0);
+    if(!fxaa) return;
+    if(gfx_legacygl()) drawpass(fxaaprog, w, h, 0);
+    else gfx->postpass(0, 0);
 }
 
 void renderpostfxfinal(int w, int h) // after everything, including the HUD and menus
 {
     extern int vgamma;
-    if(vgamma != 100 && postfxgamma()) drawpass(gammaprog, w, h, 100.0f / vgamma);
+    if(vgamma == 100 || !postfxgamma()) return;
+    if(gfx_legacygl()) drawpass(gammaprog, w, h, 100.0f / vgamma);
+    else gfx->postpass(1, 100.0f / vgamma);
 }
 
 VARP(worldshader, 0, 0, 1);

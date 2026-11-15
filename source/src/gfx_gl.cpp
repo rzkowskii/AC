@@ -38,6 +38,7 @@ struct glbackend : gfxdevice
     void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data) { glReadPixels(x, y, w, h, format, type, data); }
 
     void viewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
+    void scissor(int x, int y, int w, int h) { glScissor(x, y, w, h); }
     void clearcolor(float r, float g, float b, float a) { glClearColor(r, g, b, a); }
     void clearstencil(int s) { glClearStencil(s); }
     void clear(GLbitfield mask) { glClear(mask); }
@@ -70,6 +71,7 @@ struct glbackend : gfxdevice
     void color3f(GLfloat r, GLfloat g, GLfloat b) { glColor3f(r, g, b); }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glColor4f(r, g, b, a); }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { glColor3ub(r, g, b); }
+    void color4ubv(const GLubyte *v) { glColor4ubv(v); }
     void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { glColor4ub(r, g, b, a); }
     void fogi(GLenum pname, GLint v) { glFogi(pname, v); }
     void fogf(GLenum pname, GLfloat v) { glFogf(pname, v); }
@@ -77,6 +79,11 @@ struct glbackend : gfxdevice
     void hint(GLenum target, GLenum mode) { glHint(target, mode); }
     void shademodel(GLenum mode) { glShadeModel(mode); }
     void cleardepth(GLdouble d) { glClearDepth(d); }
+    void stencilfunc(GLenum func, GLint ref, GLuint mask) { glStencilFunc(func, ref, mask); }
+    void stencilop(GLenum fail, GLenum zfail, GLenum zpass) { glStencilOp(fail, zfail, zpass); }
+    void stencilfuncseparate(GLenum frontfunc, GLenum backfunc, GLint ref, GLuint mask) { glStencilFuncSeparate_(frontfunc, backfunc, ref, mask); }
+    void stencilopseparate(GLenum face, GLenum fail, GLenum zfail, GLenum zpass) { glStencilOpSeparate_(face, fail, zfail, zpass); }
+    void activestencilface(GLenum face) { glActiveStencilFace_(face); }
     void texenvi(GLenum pname, GLint v) { glTexEnvi(GL_TEXTURE_ENV, pname, v); }
     void texenvfv(GLenum pname, const GLfloat *v) { glTexEnvfv(GL_TEXTURE_ENV, pname, v); }
     void activetexture(GLenum unit) { glActiveTexture_(unit); }
@@ -96,6 +103,10 @@ struct glbackend : gfxdevice
     {
         glTexSubImage2D(target, level, x, y, w, h, format, type, pixels);
     }
+    void copytexsubimage2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei w, GLsizei h)
+    {
+        glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, w, h);
+    }
 
     void genbuffers(GLsizei n, GLuint *b) { glGenBuffers_(n, b); }
     void deletebuffers(GLsizei n, const GLuint *b) { glDeleteBuffers_(n, b); }
@@ -107,6 +118,7 @@ struct glbackend : gfxdevice
     void disableclientstate(GLenum array) { glDisableClientState(array); }
     void vertexpointer(GLint size, GLenum type, GLsizei stride, const void *p) { glVertexPointer(size, type, stride, p); }
     void colorpointer(GLint size, GLenum type, GLsizei stride, const void *p) { glColorPointer(size, type, stride, p); }
+    void normalpointer(GLenum type, GLsizei stride, const void *p) { glNormalPointer(type, stride, p); }
     void texcoordpointer(GLint size, GLenum type, GLsizei stride, const void *p) { glTexCoordPointer(size, type, stride, p); }
     void drawarrays(GLenum mode, GLint first, GLsizei count) { glDrawArrays(mode, first, count); }
     void multidrawarrays(GLenum mode, const GLint *first, const GLsizei *count, GLsizei n) { glMultiDrawArrays_(mode, (GLint *)first, (GLsizei *)count, n); } // (older glext.h declares non-const arrays)

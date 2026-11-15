@@ -782,7 +782,7 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
             inputgrab(grabinput = fullscreen ? true : false);
             useddepthbits = gfx->getdepthbits();
             usedfsaa = gfx->getsamples() > 1 ? gfx->getsamples() : 0;
-            hasstencil = false;
+            hasstencil = gfx->getstencilbits() >= 8;
             return;
         }
         conoutf("\f3SDL GPU renderer not available: using OpenGL");

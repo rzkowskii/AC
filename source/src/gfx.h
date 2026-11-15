@@ -24,13 +24,18 @@ struct gfxdevice
     // --- device and presentation
     virtual bool init(SDL_Window *window, int samples, int vsync) { return true; } // (the GL context is made by main.cpp)
     virtual int getdepthbits() { return 0; }
+    virtual int getstencilbits() { return 0; }                  // (GPU backend: 8 if stencilbits asked for one)
     virtual int getsamples() { return 0; }
     virtual void present() = 0;                                 // shows the frame (GL: SDL_GL_SwapWindow)
     virtual void displaychanged() {}                            // re-applies the presentation settings (GPU backend)
+    // post-processing done by the backend itself (GPU backend; GL uses shaders.cpp): 0 = FXAA of the scene so far,
+    // 1 = gamma with exponent param, applied to the finished frame. false: not available
+    virtual bool postpass(int kind, float param) { return false; }
     virtual void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data) = 0; // like glReadPixels
 
     // --- frame and targets
     virtual void viewport(int x, int y, int w, int h) = 0;
+    virtual void scissor(int x, int y, int w, int h) = 0;
     virtual void clearcolor(float r, float g, float b, float a) = 0;
     virtual void clearstencil(int s) = 0;
     virtual void clear(GLbitfield mask) = 0;
@@ -65,6 +70,7 @@ struct gfxdevice
     virtual void color3f(GLfloat r, GLfloat g, GLfloat b) = 0;
     virtual void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) = 0;
     virtual void color3ub(GLubyte r, GLubyte g, GLubyte b) = 0;
+    virtual void color4ubv(const GLubyte *v) = 0;
     virtual void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) = 0;
     virtual void fogi(GLenum pname, GLint v) = 0;
     virtual void fogf(GLenum pname, GLfloat v) = 0;
@@ -72,6 +78,13 @@ struct gfxdevice
     virtual void hint(GLenum target, GLenum mode) = 0;
     virtual void shademodel(GLenum mode) = 0;
     virtual void cleardepth(GLdouble d) = 0;
+    virtual void stencilfunc(GLenum func, GLint ref, GLuint mask) = 0;
+    virtual void stencilop(GLenum fail, GLenum zfail, GLenum zpass) = 0;
+    // separate front and back stencil state (shadow.cpp): GL_ATI_separate_stencil, or GL_EXT_stencil_two_side's
+    // active face (GL_STENCIL_TEST_TWO_SIDE_EXT enabled: stencilfunc/stencilop set the active face only)
+    virtual void stencilfuncseparate(GLenum frontfunc, GLenum backfunc, GLint ref, GLuint mask) = 0;
+    virtual void stencilopseparate(GLenum face, GLenum fail, GLenum zfail, GLenum zpass) = 0;
+    virtual void activestencilface(GLenum face) = 0;
     virtual void texenvi(GLenum pname, GLint v) = 0;           // texture combiners of the active unit (texture.cpp, setuptmu)
     virtual void texenvfv(GLenum pname, const GLfloat *v) = 0;
     virtual void activetexture(GLenum unit) = 0;
@@ -86,6 +99,7 @@ struct gfxdevice
     virtual void pixelstorei(GLenum pname, GLint v) = 0;
     virtual void teximage2d(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border, GLenum format, GLenum type, const void *pixels) = 0;
     virtual void texsubimage2d(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, const void *pixels) = 0;
+    virtual void copytexsubimage2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei w, GLsizei h) = 0; // from the frame
 
     // --- buffer objects (GL_ARRAY_BUFFER_ARB, GL_ELEMENT_ARRAY_BUFFER_ARB)
     virtual void genbuffers(GLsizei n, GLuint *b) = 0;
@@ -99,6 +113,7 @@ struct gfxdevice
     virtual void disableclientstate(GLenum array) = 0;
     virtual void vertexpointer(GLint size, GLenum type, GLsizei stride, const void *p) = 0;
     virtual void colorpointer(GLint size, GLenum type, GLsizei stride, const void *p) = 0;
+    virtual void normalpointer(GLenum type, GLsizei stride, const void *p) = 0;
     virtual void texcoordpointer(GLint size, GLenum type, GLsizei stride, const void *p) = 0;
     virtual void drawarrays(GLenum mode, GLint first, GLsizei count) = 0;
     virtual void multidrawarrays(GLenum mode, const GLint *first, const GLsizei *count, GLsizei n) = 0;
