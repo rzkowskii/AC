@@ -22,7 +22,6 @@ JOBS="$(sysctl -n hw.ncpu)"
 # name | url | sha256 (cross-checked against Homebrew formulae and GitHub release digests)
 PACKAGES=(
   "SDL2-2.32.10|https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz|5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165"
-  "SDL2_image-2.8.12|https://github.com/libsdl-org/SDL_image/releases/download/release-2.8.12/SDL2_image-2.8.12.tar.gz|393f5efb50536ec13ca4f4affb69cc9966d3c3f969e6c5e701faddf9f9785381"
   "libogg-1.3.6|https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz|83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638"
   "libvorbis-1.3.7|https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz|b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b"
   "openal-soft-1.25.2|https://openal-soft.org/openal-releases/openal-soft-1.25.2.tar.bz2|1dbaac44e7579d5bc8847ca8db4b2e8b9fd3961041f35ee20def4958301e1089"
@@ -86,12 +85,7 @@ done
 
 cmakebuild SDL2-2.32.10 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
 
-# image formats are decoded with the built-in stb_image (PNG, JPEG) and SDL_image's own loaders (BMP, TGA, ...):
-# no external image libraries, same decoder on every macOS version
-cmakebuild SDL2_image-2.8.12 -DSDL2IMAGE_VENDORED=OFF -DSDL2IMAGE_DEPS_SHARED=OFF \
-  -DSDL2IMAGE_BACKEND_STB=ON -DSDL2IMAGE_BACKEND_IMAGEIO=OFF \
-  -DSDL2IMAGE_AVIF=OFF -DSDL2IMAGE_JXL=OFF -DSDL2IMAGE_TIF=OFF -DSDL2IMAGE_WEBP=OFF \
-  -DSDL2IMAGE_SAMPLES=OFF -DSDL2IMAGE_TESTS=OFF
+# (no SDL_image: the game decodes PNG and JPEG textures itself with stb_image, source/src/stbimage.cpp)
 
 cmakebuild libogg-1.3.6 -DBUILD_TESTING=OFF -DINSTALL_DOCS=OFF
 cmakebuild libvorbis-1.3.7 -DBUILD_TESTING=OFF

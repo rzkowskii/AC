@@ -312,15 +312,76 @@ SDL_Surface *texdecal(SDL_Surface *s)
     return m;
 }
 
-void scalesurface(SDL_Surface *s, float scale)
+// texture decoding: stb_image (stbimage.cpp), into the surface formats SDL2_image's STB backend produced (which the macOS
+// app always used): 8-bit grey with a grey-ramp palette, RGB24 or RGBA32 (grey + alpha becomes RGBA), rows tightly packed
+extern uchar *stbdecode(const uchar *data, int len, int &w, int &h, int &channels);
+extern const char *stberror();
+extern stream *openrawfile(const char *filename, const char *mode);
+
+static SDL_Surface *imagesurface(uchar *pixels, int w, int h, int channels)
 {
-    uint dw = s->w*scale, dh = s->h*scale;
-    uchar *buf = new uchar[dw*dh*s->format->BytesPerPixel];
-    scaletexture((uchar *)s->pixels, s->w, s->h, s->format->BytesPerPixel, buf, dw, dh);
-    delete[] (uchar *)s->pixels;
-    s->w = dw;
-    s->h = dh;
-    s->pixels = buf;
+    SDL_Surface *s = NULL;
+    if(channels == 2)
+    {
+        s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
+        if(s) loop(y, h)
+        {
+            const uchar *src = pixels + y*w*2;
+            uchar *dst = (uchar *)s->pixels + y*s->pitch;
+            loop(x, w) { dst[0] = dst[1] = dst[2] = src[0]; dst[3] = src[1]; dst += 4; src += 2; }
+        }
+        SDL_free(pixels);
+        return s;
+    }
+    if(channels < 1 || channels > 4) { SDL_free(pixels); return NULL; }
+    s = SDL_CreateRGBSurfaceWithFormatFrom(pixels, w, h, 8*channels, w*channels,
+            channels == 4 ? SDL_PIXELFORMAT_RGBA32 : (channels == 3 ? SDL_PIXELFORMAT_RGB24 : SDL_PIXELFORMAT_INDEX8));
+    if(!s) { SDL_free(pixels); return NULL; }
+    if(s->format->palette) loopi(s->format->palette->ncolors)
+    {
+        SDL_Color &c = s->format->palette->colors[i];
+        c.r = c.g = c.b = i;
+    }
+    s->flags &= ~SDL_PREALLOC; // the surface owns the decoded pixels (allocated with SDL_malloc) and frees them
+    return s;
+}
+
+static SDL_Surface *loadimage(stream *f)
+{
+    if(!f) return NULL;
+    long len = f->size();
+    SDL_Surface *s = NULL;
+    if(len > 0 && len < (1<<28))
+    {
+        uchar *data = new uchar[len];
+        if(f->read(data, len) == len)
+        {
+            int w, h, channels;
+            uchar *pixels = stbdecode(data, len, w, h, channels);
+            if(pixels) s = imagesurface(pixels, w, h, channels);
+            else clientlogf("image decoding failed: %s", stberror());
+        }
+        delete[] data;
+    }
+    delete f;
+    return s;
+}
+
+SDL_Surface *loadimage(const char *filename) { return loadimage(openrawfile(filename, "rb")); }
+
+// returns a copy of s scaled by a factor (rows tightly packed, like the decoded images); frees s
+SDL_Surface *scalesurface(SDL_Surface *s, float scale)
+{
+    uint bpp = s->format->BytesPerPixel, dw = s->w*scale, dh = s->h*scale;
+    uchar *buf = (uchar *)SDL_malloc(dw*dh*bpp);
+    if(!buf) return s;
+    scaletexture((uchar *)s->pixels, s->w, s->h, bpp, buf, dw, dh);
+    SDL_Surface *d = SDL_CreateRGBSurfaceWithFormatFrom(buf, dw, dh, 8*bpp, dw*bpp, s->format->format);
+    if(!d) { SDL_free(buf); return s; }
+    if(s->format->palette && d->format->palette) SDL_SetPaletteColors(d->format->palette, s->format->palette->colors, 0, s->format->palette->ncolors);
+    d->flags &= ~SDL_PREALLOC;
+    SDL_FreeSurface(s);
+    return d;
 }
 
 bool silent_texture_load = false;
@@ -342,19 +403,9 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
     const char *ffile = findfile(file, "rb");
     if(findfilelocation == FFL_ZIP)
     {
-        stream *z = openzipfile(file, "rb");
-        if(z)
-        {
-            SDL_RWops *rw = z->rwops();
-            if(rw)
-            {
-                s = IMG_Load_RW(rw, 0);
-                SDL_FreeRW(rw);
-            }
-            delete z;
-        }
+        s = loadimage(openzipfile(file, "rb"));
     }
-    else if(!s) s = IMG_Load(ffile);
+    else s = loadimage(ffile);
     if(!s)
     {
         if(trydl) requirepackage(PCK_TEXTURE, file);
@@ -386,7 +437,7 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
         if(!strncmp(cmd, "decal", arg1-cmd)) { s = texdecal(s); format = texformat(s->format->BitsPerPixel); }
     }
 
-    if(uniformtexres && scale > 1.0f) scalesurface(s, 1.0f/scale);
+    if(uniformtexres && scale > 1.0f) s = scalesurface(s, 1.0f/scale);
 
     GLuint tnum;
     gfx->gentextures(1, &tnum);

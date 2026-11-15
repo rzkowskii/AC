@@ -35,12 +35,10 @@
 					<Add option="-mwindows" />
 					<Add library="SDL2main" />
 					<Add library="SDL2" />
-					<Add library="SDL2_image" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
 					<Add library="OpenAL32" />
 					<Add library="vorbisfile" />
-					<Add library="jpeg" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
 					<Add directory="../lib" />
@@ -68,12 +66,10 @@
 				<Linker>
 					<Add library="SDL2main" />
 					<Add library="SDL2" />
-					<Add library="SDL2_image" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
 					<Add library="OpenAL32" />
 					<Add library="vorbisfile" />
-					<Add library="jpeg" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
 					<Add library="gdi32" />
@@ -435,6 +431,10 @@
 			<Option target="debug" />
 		</Unit>
 		<Unit filename="../src/shaders.cpp">
+			<Option target="default" />
+			<Option target="debug" />
+		</Unit>
+		<Unit filename="../src/stbimage.cpp">
 			<Option target="default" />
 			<Option target="debug" />
 		</Unit>

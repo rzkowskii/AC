@@ -92,7 +92,7 @@ CLIENT_INCLUDES= $(INCLUDES) -I../include
 CLIENT_LIBS= -mwindows -L../lib -lSDL2 -lSDL2_image -lzdll -lopengl32 -lenet -lOpenAL32 -llibvorbisfile -lws2_32 -lwinmm
 else ifeq ($(PLATFORM),Darwin)
 # Native macOS build (arm64 on Apple Silicon, x86_64 on Intel).
-# By default it links against Homebrew/MacPorts SDL2, SDL2_image and libvorbis (sdl2-config in PATH) - fine for development.
+# By default it links against Homebrew/MacPorts SDL2 and libvorbis (sdl2-config in PATH) - fine for development.
 # For a distributable build, source/macos/make-app.sh sets MACOS_DEPS to the universal static libraries made by
 # source/macos/build-deps.sh, and MACOS_ARCH to the architecture being built (one build per architecture, then lipo).
 ifdef MACOS_DEPS
@@ -121,11 +121,11 @@ override CXXFLAGS+= -march=x86-64-v2
 endif
 endif
 CLIENT_INCLUDES= $(INCLUDES) `$(SDL2_CONFIG) --cflags` $(MACOS_DEPS_INCLUDES) -idirafter ../include
-CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) -lSDL2_image $(SDL2_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
+CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) $(SDL2_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
 else
 USRLIB=$(shell if [ -e /usr/lib64 ]; then echo "/usr/lib64"; else echo "/usr/lib"; fi)
 CLIENT_INCLUDES= $(INCLUDES) -I/usr/include `sdl2-config --cflags` -idirafter ../include
-CLIENT_LIBS= -L../enet/.libs -lenet -L$(USRLIB) -lX11 `sdl2-config --libs` -lSDL2_image -lz -lGL -lopenal -lvorbisfile
+CLIENT_LIBS= -L../enet/.libs -lenet -L$(USRLIB) -lX11 `sdl2-config --libs` -lz -lGL -lopenal -lvorbisfile
 endif
 
 CLIENT_OBJS= \
@@ -165,6 +165,7 @@ CLIENT_OBJS= \
 	shadow.o \
 	soundlocation.o \
 	soundscheduler.o \
+	stbimage.o \
 	stream.o \
 	texture.o \
 	tools.o \

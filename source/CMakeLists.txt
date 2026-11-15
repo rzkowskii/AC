@@ -116,7 +116,6 @@ set(SERVER_SOURCES ${SRC}/crypto.cpp ${SRC}/log.cpp ${SRC}/protocol.cpp ${SRC}/s
 
 if(AC_CLIENT)
   find_package(OpenGL REQUIRED)
-  ac_dependency(ac::sdl2image SDL2_image SDL2_image::SDL2_image SDL2_image SDL_image.h SDL2 SDL2_image)
   ac_dependency(ac::vorbisfile "" "" vorbisfile vorbis/vorbisfile.h "" vorbisfile vorbis ogg)
   find_package(OpenAL REQUIRED)
   file(GLOB CLIENT_SOURCES ${SRC}/*.cpp ${SRC}/bot/*.cpp)
@@ -126,13 +125,14 @@ if(AC_CLIENT)
   # source/include holds Windows copies of SDL etc.; only its GL/glext.h is wanted, so it's searched last (as in the Makefile)
   target_compile_options(ac_client PRIVATE -idirafter ${CMAKE_CURRENT_SOURCE_DIR}/include)
   target_include_directories(ac_client PRIVATE ${OPENAL_INCLUDE_DIR})
-  target_link_libraries(ac_client PRIVATE enet ac::sdl2 ac::sdl2image ac::vorbisfile ZLIB::ZLIB
+  target_link_libraries(ac_client PRIVATE enet ac::sdl2 ac::vorbisfile ZLIB::ZLIB
     OpenGL::GL ${OPENAL_LIBRARY} Threads::Threads)
   if(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
     target_link_libraries(ac_client PRIVATE X11::X11)
   endif()
   target_precompile_headers(ac_client PRIVATE ${SRC}/cube.h)
+  set_source_files_properties(${SRC}/stbimage.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON) # stb_image collides with cube.h's macros
 endif()
 
 if(AC_SERVER)

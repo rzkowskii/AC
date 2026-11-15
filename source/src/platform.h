@@ -40,7 +40,6 @@
 
 #ifndef STANDALONE
     #include <SDL.h>
-    #include <SDL_image.h>
 
     #ifdef __APPLE__
         #undef SDL_VIDEO_DRIVER_WINDOWS

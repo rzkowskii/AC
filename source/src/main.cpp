@@ -1829,7 +1829,8 @@ int main(int argc, char **argv)
     initlog("video: misc");
 
 #ifndef __APPLE__
-    SDL_Surface *icon = IMG_Load("packages/misc/icon.png");
+    extern SDL_Surface *loadimage(const char *filename);
+    SDL_Surface *icon = loadimage("packages/misc/icon.png");
     SDL_SetWindowIcon(screen, icon);
 #endif
 

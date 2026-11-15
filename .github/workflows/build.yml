@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config clang \
-            libsdl2-dev libsdl2-image-dev libopenal-dev libvorbis-dev zlib1g-dev libx11-dev libgl-dev
+            libsdl2-dev libopenal-dev libvorbis-dev zlib1g-dev libx11-dev libgl-dev
       - name: CMake build
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install sdl2-compat sdl2_image libvorbis
+        run: brew install sdl2-compat libvorbis
       - name: CMake build (Homebrew libraries)
         run: |
           cmake -S source -B build

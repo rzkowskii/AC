@@ -239,6 +239,9 @@
     <ClCompile Include="..\src\shaders.cpp">
       <Filter>render</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\stbimage.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
     <ClCompile Include="..\enet\callbacks.c">
       <Filter>enet</Filter>
     </ClCompile>
