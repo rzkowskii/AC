@@ -512,7 +512,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Standalone|Win32'">true</ExcludedFromBuild>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Standalone|Win32'">Use</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\src\postfx.cpp">
+    <ClCompile Include="..\src\shaders.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Standalone Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Standalone|Win32'">true</ExcludedFromBuild>
     </ClCompile>

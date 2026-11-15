@@ -86,6 +86,7 @@ void renderstripssky()
 
 void renderstrips()
 {
+    bool shader = beginworldshader();
     loopj(renderedtexs)
     {
         stripbatch &sb = stripbatches[j];
@@ -95,6 +96,7 @@ void renderstrips()
         RENDERSTRIPS(sb.quads, GL_QUADS);
     }
     renderedtexs = 0;
+    if(shader) endworldshader();
 
     glDisableClientState(GL_VERTEX_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);

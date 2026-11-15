@@ -116,6 +116,10 @@ extern PFNGLBINDBUFFERPROC    glBindBuffer_;
 extern PFNGLBUFFERDATAPROC    glBufferData_;
 extern PFNGLBUFFERSUBDATAPROC glBufferSubData_;
 
+// shaders.cpp
+extern bool beginworldshader();
+extern void endworldshader();
+
 // GL_EXT_stencil_two_side
 extern PFNGLACTIVESTENCILFACEEXTPROC glActiveStencilFace_;
 

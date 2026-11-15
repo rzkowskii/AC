@@ -354,6 +354,7 @@ struct vertmodel : model
                 lastcolorarray = NULL;
             }
             glBindBuffer_(GL_ARRAY_BUFFER_ARB, 0);
+            bool shader = beginworldshader();
             loopi(numdyndraws)
             {
                 const drawcall &d = dyndraws[i];
@@ -361,6 +362,7 @@ struct vertmodel : model
                 if(hasDRE) glDrawRangeElements_(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, idx);
                 else glDrawElements(d.type, d.count, GL_UNSIGNED_SHORT, idx);
             }
+            if(shader) endworldshader();
             glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
             xtraverts += dynlen;
             return true;
@@ -544,7 +546,9 @@ struct vertmodel : model
             }
             if(isstat && statlist && !stenciling)
             {
+                bool shader = beginworldshader();
                 glCallList(statlist);
+                if(shader) endworldshader();
                 xtraverts += statlen;
                 return;
             }
@@ -620,16 +624,20 @@ struct vertmodel : model
 
             bool builddlist = isstat && !owner->model->vertexlight && mdldlist;
             if(builddlist) glNewList(statlist = glGenLists(1), GL_COMPILE);
+            bool shader = !builddlist && beginworldshader();
             loopi(numdyndraws)
             {
                 const drawcall &d = dyndraws[i];
                 if(hasDRE && !builddlist) glDrawRangeElements_(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
                 else glDrawElements(d.type, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
             }
+            if(shader) endworldshader();
             if(builddlist)
             {
                 glEndList();
+                shader = beginworldshader();
                 glCallList(statlist);
+                if(shader) endworldshader();
                 statlen = dynlen;
             }
             xtraverts += dynlen;

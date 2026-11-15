@@ -148,7 +148,6 @@ CLIENT_OBJS= \
 	openal.o \
 	packetqueue.o \
 	physics.o \
-	postfx.o \
 	protocol.o \
 	rendercubes.o \
 	rendergl.o \
@@ -161,6 +160,7 @@ CLIENT_OBJS= \
 	serverms.o \
 	server.o \
 	serverbrowser.o \
+	shaders.o \
 	shadow.o \
 	soundlocation.o \
 	soundscheduler.o \
@@ -385,9 +385,9 @@ physics.o: protos.h
 protocol.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h
 protocol.o: weapon.h entity.h world.h command.h varray.h vote.h console.h
 protocol.o: protos.h
-postfx.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h
-postfx.o: weapon.h entity.h world.h command.h varray.h vote.h console.h
-postfx.o: protos.h
+shaders.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h
+shaders.o: weapon.h entity.h world.h command.h varray.h vote.h console.h
+shaders.o: protos.h
 rendercubes.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h
 rendercubes.o: weapon.h entity.h world.h command.h varray.h vote.h console.h
 rendercubes.o: protos.h

@@ -1,11 +1,15 @@
-// postfx.cpp: full-screen post-processing with GLSL shaders
+// shaders.cpp: GLSL shaders (OpenGL 2.0) used alongside the fixed-function renderer
 //
+// - scene ("worldshader 1", default off): the world's surfaces and models are drawn with a shader equivalent to their
+//   fixed-function state (texture * colour * 2, linear fog), with the same image. It's the first step of moving the
+//   renderer off fixed-function OpenGL; on Apple's OpenGL-on-Metal it measured no faster than fixed-function.
 // - gamma: the "gamma" setting is applied to the game's image by a shader, with the same curve the hardware gamma
 //   ramp used (SDL: output = input ^ (100 / gamma)). The hardware ramp changes the whole display (macOS) or isn't
 //   available at all (Wayland), and stays wrong if the game crashes. "gammashader 0" restores the hardware ramp.
 // - fxaa: optional fast approximate antialiasing of the 3D scene (before the HUD, so text stays sharp).
 //
-// Each active pass resolves the back buffer into a texture (glBlitFramebuffer, which also resolves multisampling) and
+//
+// Each active post-processing pass resolves the back buffer into a texture (glBlitFramebuffer, which also resolves multisampling) and
 // draws it back through a fragment shader. Nothing runs, and nothing is allocated, while no pass is active.
 
 #include "cube.h"
@@ -121,14 +125,41 @@ static const char *fxaafs =
     "    gl_FragColor = vec4((lB < lmin || lB > lmax) ? rgbA : rgbB, 1.0);\n"
     "}\n";
 
+// World surfaces: the fixed-function state they're drawn with (setuptmu(0, "T * P x 2") and GL_LINEAR fog), as a shader.
+// ftransform() keeps positions (and depth) invariant with the fixed-function passes. Fog uses the radial distance to the
+// eye, which matches Apple's fixed-function fog and is never thinner than the eye-plane distance other drivers may use,
+// so the shader can't show more through the fog than fixed-function rendering does.
+static const char *worldvs =
+    "#version 120\n"
+    "void main()\n"
+    "{\n"
+    "    gl_Position = ftransform();\n"
+    "    gl_TexCoord[0] = gl_TextureMatrix[0] * gl_MultiTexCoord0;\n"
+    "    gl_FrontColor = gl_Color;\n"
+    "    gl_FogFragCoord = length((gl_ModelViewMatrix * gl_Vertex).xyz);\n"
+    "}\n";
+
+static const char *worldfs =
+    "#version 120\n"
+    "uniform sampler2D tex;\n"
+    "uniform float fogon;\n"
+    "void main()\n"
+    "{\n"
+    "    vec4 c = texture2D(tex, gl_TexCoord[0].xy) * gl_Color;\n"
+    "    c.rgb = min(c.rgb * 2.0, 1.0);\n"
+    "    float f = fogon > 0.5 ? clamp((gl_Fog.end - gl_FogFragCoord) * gl_Fog.scale, 0.0, 1.0) : 1.0;\n"
+    "    gl_FragColor = vec4(mix(gl_Fog.color.rgb, c.rgb, f), c.a);\n"
+    "}\n";
+
 struct postprogram
 {
-    const char *name, *fs;
+    const char *name, *fs, *vs;
     GLuint program;
     GLint texloc, paramloc;
     bool failed;
 };
-static postprogram gammaprog = { "gamma", gammafs, 0, -1, -1, false }, fxaaprog = { "fxaa", fxaafs, 0, -1, -1, false };
+static postprogram gammaprog = { "gamma", gammafs, NULL, 0, -1, -1, false }, fxaaprog = { "fxaa", fxaafs, NULL, 0, -1, -1, false },
+                   worldprog = { "world", worldfs, worldvs, 0, -1, -1, false };
 
 static bool compileprogram(postprogram &p);
 
@@ -163,7 +194,7 @@ static bool loadprogram(postprogram &p)
 
 static bool compileprogram(postprogram &p)
 {
-    GLuint vs = compileshader(GL_VERTEX_SHADER, postvs, p.name), fs = vs ? compileshader(GL_FRAGMENT_SHADER, p.fs, p.name) : 0;
+    GLuint vs = compileshader(GL_VERTEX_SHADER, p.vs ? p.vs : postvs, p.name), fs = vs ? compileshader(GL_FRAGMENT_SHADER, p.fs, p.name) : 0;
     if(!vs || !fs) { if(vs) glDeleteShader_(vs); p.failed = true; return false; }
     p.program = glCreateProgram_();
     glAttachShader_(p.program, vs);
@@ -184,7 +215,7 @@ static bool compileprogram(postprogram &p)
         return false;
     }
     p.texloc = glGetUniformLocation_(p.program, "tex");
-    p.paramloc = glGetUniformLocation_(p.program, p.fs == gammafs ? "exponent" : "texel");
+    p.paramloc = glGetUniformLocation_(p.program, p.fs == gammafs ? "exponent" : (p.fs == worldfs ? "fogon" : "texel"));
     return true;
 }
 
@@ -282,6 +313,24 @@ void renderpostfxfinal(int w, int h) // after everything, including the HUD and 
     if(vgamma != 100 && postfxgamma()) drawpass(gammaprog, w, h, 100.0f / vgamma);
 }
 
+VARP(worldshader, 0, 0, 1);
+
+// Binds the scene shader if it can replace the current fixed-function state: texturing on, with texture unit 0 set up as
+// setuptmu(0, "T * P x 2"). Used for the world's strips and for models; alpha test, alpha-to-coverage and blending are
+// fixed-function operations after the shader and keep working. Call endworldshader() after drawing if it returned true.
+bool beginworldshader()
+{
+    extern bool tmuismodulate2x(int n);
+    if(!worldshader || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D) || !loadprogram(worldprog)) return false;
+    glUseProgram_(worldprog.program);
+    glUniform1i_(worldprog.texloc, 0);
+    glUniform1f_(worldprog.paramloc, glIsEnabled(GL_FOG) ? 1.0f : 0.0f);
+    return true;
+}
+
+void endworldshader() { glUseProgram_(0); }
+
+
 void cleanuppostfx() // the GL context is about to be destroyed (resetgl)
 {
     if(screentex) glDeleteTextures(1, &screentex);
@@ -290,7 +339,8 @@ void cleanuppostfx() // the GL context is about to be destroyed (resetgl)
     screentexw = screentexh = 0;
     if(gammaprog.program) glDeleteProgram_(gammaprog.program);
     if(fxaaprog.program) glDeleteProgram_(fxaaprog.program);
-    gammaprog.program = fxaaprog.program = 0;
-    gammaprog.failed = fxaaprog.failed = false;
+    if(worldprog.program) glDeleteProgram_(worldprog.program);
+    gammaprog.program = fxaaprog.program = worldprog.program = 0;
+    gammaprog.failed = fxaaprog.failed = worldprog.failed = false;
     glslchecked = false;
 }

@@ -229,7 +229,7 @@
 		<Unit filename="../src/protocol.h" />
 		<Unit filename="../src/protos.h" />
 		<Unit filename="../src/rendercubes.cpp" />
-		<Unit filename="../src/postfx.cpp" />
+		<Unit filename="../src/shaders.cpp" />
 		<Unit filename="../src/rendergl.cpp" />
 		<Unit filename="../src/renderhud.cpp" />
 		<Unit filename="../src/rendermodel.cpp" />

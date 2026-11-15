@@ -749,6 +749,20 @@ void committmufunc(bool rgb, tmufunc &dst, tmufunc &src)
     if(dst.scale!=src.scale) glTexEnvi(GL_TEXTURE_ENV, rgb ? GL_RGB_SCALE_ARB : GL_ALPHA_SCALE, src.scale);
 }
 
+// is texture unit n set up as setuptmu(n, "T * P x 2") (the world's and models' state, which the scene shader replaces)?
+bool tmuismodulate2x(int n)
+{
+    if(n >= maxtmus) return false;
+    const tmu &t = tmus[n];
+    return t.mode == GL_COMBINE_ARB &&
+           t.rgb.combine == GL_MODULATE && t.rgb.scale == 2 &&
+           t.rgb.sources[0] == GL_TEXTURE && t.rgb.ops[0] == GL_SRC_COLOR &&
+           t.rgb.sources[1] == GL_PREVIOUS_ARB && t.rgb.ops[1] == GL_SRC_COLOR &&
+           t.alpha.combine == GL_MODULATE && t.alpha.scale == 1 &&
+           t.alpha.sources[0] == GL_TEXTURE && t.alpha.ops[0] == GL_SRC_ALPHA &&
+           t.alpha.sources[1] == GL_PREVIOUS_ARB && t.alpha.ops[1] == GL_SRC_ALPHA;
+}
+
 void committmu(int n, tmu &f)
 {
     if(n>=maxtmus) return;

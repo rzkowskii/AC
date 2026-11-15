@@ -233,7 +233,7 @@
     <ClCompile Include="..\src\rendercubes.cpp">
       <Filter>render</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\postfx.cpp">
+    <ClCompile Include="..\src\shaders.cpp">
       <Filter>render</Filter>
     </ClCompile>
     <ClCompile Include="..\enet\callbacks.c">

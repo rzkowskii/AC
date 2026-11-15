@@ -430,7 +430,7 @@
 		<Unit filename="../enet/win32.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="../src/postfx.cpp">
+		<Unit filename="../src/shaders.cpp">
 			<Option target="default" />
 			<Option target="debug" />
 		</Unit>
