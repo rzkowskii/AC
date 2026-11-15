@@ -609,7 +609,7 @@ void CWaypointClass::Think()
           }
      }
 
-     if (m_bDrawWaypoints)  // display the waypoints if turned on...
+     if (m_bDrawWaypoints && gfx_legacygl())  // display the waypoints if turned on... (drawn with GL: not on the GPU backend yet)
      {
           DrawNearWaypoints();
      }

@@ -70,6 +70,7 @@ struct glbackend : gfxdevice
     void color3f(GLfloat r, GLfloat g, GLfloat b) { glColor3f(r, g, b); }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glColor4f(r, g, b, a); }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { glColor3ub(r, g, b); }
+    void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { glColor4ub(r, g, b, a); }
     void fogi(GLenum pname, GLint v) { glFogi(pname, v); }
     void fogf(GLenum pname, GLfloat v) { glFogf(pname, v); }
     void fogfv(GLenum pname, const GLfloat *v) { glFogfv(pname, v); }
@@ -79,6 +80,7 @@ struct glbackend : gfxdevice
     void texenvi(GLenum pname, GLint v) { glTexEnvi(GL_TEXTURE_ENV, pname, v); }
     void texenvfv(GLenum pname, const GLfloat *v) { glTexEnvfv(GL_TEXTURE_ENV, pname, v); }
     void activetexture(GLenum unit) { glActiveTexture_(unit); }
+    void clientactivetexture(GLenum unit) { glClientActiveTexture_(unit); }
     void getintegerv(GLenum pname, GLint *v) { glGetIntegerv(pname, v); }
 
     void gentextures(GLsizei n, GLuint *t) { glGenTextures(n, t); }
@@ -117,8 +119,10 @@ struct glbackend : gfxdevice
     void begin(GLenum mode) { glBegin(mode); }
     void end() { glEnd(); }
     void texcoord2f(GLfloat s, GLfloat t) { glTexCoord2f(s, t); }
+    void texcoord2i(GLint s, GLint t) { glTexCoord2i(s, t); }
     void vertex2f(GLfloat x, GLfloat y) { glVertex2f(x, y); }
     void vertex3f(GLfloat x, GLfloat y, GLfloat z) { glVertex3f(x, y, z); }
+    void vertex3fv(const GLfloat *v) { glVertex3fv(v); }
 
     // --- crosshair pick target: a 1x1 framebuffer object with the main depth buffer's precision
 

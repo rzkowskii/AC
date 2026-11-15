@@ -997,10 +997,10 @@ void weapon::renderstats()
     if(!oldfashionedgunstats)
     {
         int offset = text_width(gunstats);
-        glScalef(0.5f, 0.5f, 1.0f);
+        gfx->scale(0.5f, 0.5f, 1.0f);
         formatstring(gunstats)("%d", ammo);
         draw_text(gunstats, (HUDPOS_WEAPON + HUDPOS_NUMBERSPACING + offset)*2, 826*2);
-        glLoadIdentity();
+        gfx->loadidentity();
     }
 }
 

@@ -104,10 +104,10 @@ void draw_textf(const char *fstr, int left, int top, ...)
 
 inline int draw_char_contd(font &f, font::charinfo &info, int charcode, int x, int y)
 {
-    glTexCoord2f(info.left,  info.top   ); glVertex2f(x,          y);
-    glTexCoord2f(info.right, info.top   ); glVertex2f(x + info.w, y);
-    glTexCoord2f(info.right, info.bottom); glVertex2f(x + info.w, y + info.h);
-    glTexCoord2f(info.left,  info.bottom); glVertex2f(x,          y + info.h);
+    gfx->texcoord2f(info.left,  info.top   ); gfx->vertex2f(x,          y);
+    gfx->texcoord2f(info.right, info.top   ); gfx->vertex2f(x + info.w, y);
+    gfx->texcoord2f(info.right, info.bottom); gfx->vertex2f(x + info.w, y + info.h);
+    gfx->texcoord2f(info.left,  info.bottom); gfx->vertex2f(x,          y + info.h);
 
     xtraverts += 4;
     return info.w;
@@ -141,7 +141,7 @@ void render_igraphs()
     igraphbatch.sort(cmpintasc);
     int last = 0, w[2] = { (FONTH * igraphsize) / 100, (FONTH * igraphsizehardcoded) / 100 }, offs[2] = { (FONTH - w[0]) / 2, (FONTH - w[1]) / 2 }, ishc = 0;
     igraph *ig = NULL;
-    glColor4ub(255, 255, 255, 255);
+    gfx->color4ub(255, 255, 255, 255);
     loopv(igraphbatch)
     {
         if(last != igraphbatch[i].key) ig = getusedigraph((last = igraphbatch[i].key)), ishc = last > 0 && last < 10 ? 1 : 0;
@@ -221,7 +221,7 @@ static void text_color(char c, char *stack, int size, int &sp, bvec color, int a
         }
         int b = (int) (sinf(lastmillis / 200.0f) * 115.0f);
         b = stack[sp] > 0 ? 100 : min(iabs(b), 100);
-        glColor4ub(color.x, color.y, color.z, (a * b) / 100);
+        gfx->color4ub(color.x, color.y, color.z, (a * b) / 100);
     }
 }
 
@@ -397,12 +397,12 @@ void draw_text(const char *str, int left, int top, int r, int g, int b, int a, i
     int colorpos = 0, cx = INT_MIN, cy = 0, cc = ' ';
     colorstack[0] = 'c'; //indicate user color
     igraphbatch.setsize(0);
-    glBlendFunc(GL_SRC_ALPHA, curfont->tex->bpp==32 ? GL_ONE_MINUS_SRC_ALPHA : GL_ONE);
-    glBindTexture(GL_TEXTURE_2D, curfont->tex->id);
-    glBegin(GL_QUADS);
-    glColor4ub(color.x, color.y, color.z, a);
+    gfx->blendfunc(GL_SRC_ALPHA, curfont->tex->bpp==32 ? GL_ONE_MINUS_SRC_ALPHA : GL_ONE);
+    gfx->bindtexture(GL_TEXTURE_2D, curfont->tex->id);
+    gfx->begin(GL_QUADS);
+    gfx->color4ub(color.x, color.y, color.z, a);
     TEXTSKELETON
-    glEnd();
+    gfx->end();
     if(cursor >= 0)
     {
         if(cx == INT_MIN) { cx = x; cy = y; }

@@ -64,6 +64,7 @@ struct gfxdevice
     virtual void color3f(GLfloat r, GLfloat g, GLfloat b) = 0;
     virtual void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) = 0;
     virtual void color3ub(GLubyte r, GLubyte g, GLubyte b) = 0;
+    virtual void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) = 0;
     virtual void fogi(GLenum pname, GLint v) = 0;
     virtual void fogf(GLenum pname, GLfloat v) = 0;
     virtual void fogfv(GLenum pname, const GLfloat *v) = 0;
@@ -73,6 +74,7 @@ struct gfxdevice
     virtual void texenvi(GLenum pname, GLint v) = 0;           // texture combiners of the active unit (texture.cpp, setuptmu)
     virtual void texenvfv(GLenum pname, const GLfloat *v) = 0;
     virtual void activetexture(GLenum unit) = 0;
+    virtual void clientactivetexture(GLenum unit) = 0;           // which unit's texture coordinate array the array calls set
     virtual void getintegerv(GLenum pname, GLint *v) = 0;      // GL_MAX_TEXTURE_SIZE, GL_MAX_TEXTURE_UNITS_ARB, GL_SAMPLE_BUFFERS
 
     // --- textures (a texture's handle is its GL name in the GL backend)
@@ -106,8 +108,10 @@ struct gfxdevice
     virtual void begin(GLenum mode) = 0;
     virtual void end() = 0;
     virtual void texcoord2f(GLfloat s, GLfloat t) = 0;
+    virtual void texcoord2i(GLint s, GLint t) = 0;
     virtual void vertex2f(GLfloat x, GLfloat y) = 0;
     virtual void vertex3f(GLfloat x, GLfloat y, GLfloat z) = 0;
+    virtual void vertex3fv(const GLfloat *v) = 0;
 
     // --- crosshair pick pass (rendergl.cpp, renderdepthpick()) and depth reads
     virtual bool beginpick(int depthbits) = 0;                 // binds the 1x1 pick target (depth cleared, colour writes off)

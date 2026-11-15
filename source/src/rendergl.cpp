@@ -939,21 +939,21 @@ vector<zone> zones;
 
 void renderzones(float z)
 {
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDisable(GL_TEXTURE_2D);
+    gfx->enable(GL_BLEND);
+    gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    gfx->disable(GL_TEXTURE_2D);
     loopv(zones)
     {
-        glColor4f(((zones[i].color>>16)&0xFF)/255.0f, ((zones[i].color>>8)&0xFF)/255.0f, (zones[i].color&0xFF)/255.0f, 0.3f);
-        glBegin(GL_QUADS);
-        glVertex3f(zones[i].x1, zones[i].y1, z);
-        glVertex3f(zones[i].x2, zones[i].y1, z);
-        glVertex3f(zones[i].x2, zones[i].y2, z);
-        glVertex3f(zones[i].x1, zones[i].y2, z);
-        glEnd();
+        gfx->color4f(((zones[i].color>>16)&0xFF)/255.0f, ((zones[i].color>>8)&0xFF)/255.0f, (zones[i].color&0xFF)/255.0f, 0.3f);
+        gfx->begin(GL_QUADS);
+        gfx->vertex3f(zones[i].x1, zones[i].y1, z);
+        gfx->vertex3f(zones[i].x2, zones[i].y1, z);
+        gfx->vertex3f(zones[i].x2, zones[i].y2, z);
+        gfx->vertex3f(zones[i].x1, zones[i].y2, z);
+        gfx->end();
     }
-    glDisable(GL_BLEND);
-    glEnable(GL_TEXTURE_2D);
+    gfx->disable(GL_BLEND);
+    gfx->enable(GL_TEXTURE_2D);
 }
 
 void clearminimap()
@@ -1055,9 +1055,9 @@ static void cleanupdepthread();
 
 void cleanupgl()
 {
-    if(reflecttex) glDeleteTextures(1, &reflecttex);
-    if(refracttex) glDeleteTextures(1, &refracttex);
-    if(minimaptex) glDeleteTextures(1, &minimaptex);
+    if(reflecttex) gfx->deletetextures(1, &reflecttex);
+    if(refracttex) gfx->deletetextures(1, &refracttex);
+    if(minimaptex) gfx->deletetextures(1, &minimaptex);
     reflecttex = refracttex = minimaptex = 0;
     cleanupreflectfbos();
     minimapdirty = true;
@@ -1335,8 +1335,8 @@ VARP(ignoreoverride_nowaterreflect, 0, 0, 1);
 VARP(ignoreoverride_nostencilshadows, 0, 0, 1);
 
 int effective_stencilshadow = 0;
-// "stage1only 1" (testing): the GL renderer also stops after what the GPU backend draws so far, for like-for-like comparisons
-VAR(stage1only, 0, 0, 1);
+// "gpuparity 1" (testing): the GL renderer also leaves out what the GPU backend doesn't draw yet, for like-for-like comparisons
+VAR(gpuparity, 0, 0, 1);
 
 bool isoverview = false;
 
@@ -1344,10 +1344,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 {
     extern int mapoverride_nostencilshadows, mapoverride_nowaterreflect;
     effective_stencilshadow = mapoverride_nostencilshadows && !ignoreoverride_nostencilshadows ? 0 : stencilshadow;
-    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect) && gfx_legacygl();
+    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect) && gfx_legacygl() && !gpuparity;
 
     dodynlights();
-    if(gfx_legacygl()) drawminimap(w, h); // (not ported to the GPU backend yet)
+    if(gfx_legacygl() && !gpuparity) drawminimap(w, h); // (not ported to the GPU backend yet)
 
     recomputecamera();
 
@@ -1471,20 +1471,11 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     gfx->disable(GL_CULL_FACE);
 
-    if(!gfx_legacygl() || stage1only) // not ported to the GPU backend yet: particles, water, editor, post-processing, HUD
-    {
-        gfx->disable(GL_FOG);
-        gfx->disable(GL_TEXTURE_2D);
-        gfx->enable(GL_CULL_FACE);
-        gfx->enable(GL_FOG);
-        undodynlights();
-        rpmark(RP_HUD);
-        return;
-    }
-
     render_particles(curtime, PT_DECAL_MASK);
 
-    int nquads = renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex);
+    // (water, the editor overlay and post-processing aren't ported to the GPU backend yet)
+    bool legacy = gfx_legacygl() && !gpuparity;
+    int nquads = legacy ? renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex) : 0;
 
     render_particles(curtime, ~PT_DECAL_MASK);
     rpmark(RP_EFFECTS);
@@ -1492,7 +1483,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     gfx->disable(GL_FOG);
     gfx->disable(GL_TEXTURE_2D);
 
-    if(editmode)
+    if(editmode && legacy)
     {
         if(cursordepth==1.0f) worldpos = camera1->o;
         enablepolygonoffset(GL_POLYGON_OFFSET_LINE);
@@ -1507,12 +1498,12 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     tagclipcubes.setsize(0);
 
     extern void renderpostfxscene(int w, int h), renderpostfxfinal(int w, int h);
-    renderpostfxscene(w, h); // FXAA: the 3D scene only, the HUD stays sharp
+    if(legacy) renderpostfxscene(w, h); // FXAA: the 3D scene only, the HUD stays sharp
 
     extern vector<vertex> verts;
     gl_drawhud(w, h, int(curfps + 0.5f), nquads, verts.length(), underwater, elapsed);
 
-    renderpostfxfinal(w, h); // gamma: everything
+    if(legacy) renderpostfxfinal(w, h); // gamma: everything
 
     gfx->enable(GL_CULL_FACE);
     if(!isoverview) gfx->enable(GL_FOG);

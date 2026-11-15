@@ -492,12 +492,12 @@ static void resetshadowverts()
 
 static void rendershadowstrips()
 {
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->enableclientstate(GL_VERTEX_ARRAY);
+    gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
 
     shadowvertex *buf = shadowverts.getbuf();
-    glVertexPointer(3, GL_FLOAT, sizeof(shadowvertex), &buf->x);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(shadowvertex), &buf->u);
+    gfx->vertexpointer(3, GL_FLOAT, sizeof(shadowvertex), &buf->x);
+    gfx->texcoordpointer(2, GL_FLOAT, sizeof(shadowvertex), &buf->u);
 
     loopj(renderedtexs)
     {
@@ -508,8 +508,8 @@ static void rendershadowstrips()
     }
     renderedtexs = 0;
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->disableclientstate(GL_VERTEX_ARRAY);
+    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 
     xtraverts += shadowverts.length();
 }

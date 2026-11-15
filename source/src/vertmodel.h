@@ -1095,15 +1095,15 @@ struct vertmodel : model
 
         void genshadow(int aasize, int frame, stream *f)
         {
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            gfx->clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             model->startrender();
             render(ANIM_ALL|ANIM_NOINTERP|ANIM_NOSKIN, 0, 1, lastmillis-frame, NULL);
             model->endrender();
 
             uchar *pixels = new uchar[2*aasize*aasize];
-            glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glReadPixels(0, 0, aasize, aasize, GL_RED, GL_UNSIGNED_BYTE, pixels);
+            gfx->pixelstorei(GL_PACK_ALIGNMENT, 1);
+            gfx->readpixels(0, 0, aasize, aasize, GL_RED, GL_UNSIGNED_BYTE, pixels);
 #if 0
             SDL_Surface *img = SDL_CreateRGBSurface(SDL_SWSURFACE, aasize, aasize, 24, 0x0000FF, 0x00FF00, 0xFF0000, 0);
             loopi(aasize*aasize) memset((uchar *)img->pixels + 3*i, pixels[i], 3);
@@ -1131,14 +1131,14 @@ struct vertmodel : model
 
         void genshadows(float height, float rad)
         {
-            if(shadows || !gfx_legacygl()) return; // (rendered with GL; the GPU backend draws no blob shadows yet)
+            if(shadows) return;
 
             char *filename = shadowfile();
             if(filename && loadshadows(filename)) return;
 
             shadowrad = rad;
             shadows = new GLuint[numframes];
-            glGenTextures(numframes, shadows);
+            gfx->gentextures(numframes, shadows);
 
             int aasize = 1<<(dynshadowsize + aadynshadow);
             while(aasize > screenw || aasize > screenh) aasize /= 2;
@@ -1157,26 +1157,26 @@ struct vertmodel : model
                 f->putlil(hdr.rad);
             }
 
-            glViewport(0, 0, aasize, aasize);
-            glClearColor(0, 0, 0, 1);
-            glDisable(GL_FOG);
-            glColor3f(1, 1, 1);
+            gfx->viewport(0, 0, aasize, aasize);
+            gfx->clearcolor(0, 0, 0, 1);
+            gfx->disable(GL_FOG);
+            gfx->color3f(1, 1, 1);
 
-            glMatrixMode(GL_PROJECTION);
-            glLoadIdentity();
-            glOrtho(-rad, rad, -rad, rad, 0.15f, height);
+            gfx->matrixmode(GL_PROJECTION);
+            gfx->loadidentity();
+            gfx->ortho(-rad, rad, -rad, rad, 0.15f, height);
 
-            glMatrixMode(GL_MODELVIEW);
-            glLoadIdentity();
-            glScalef(1, -1, 1);
+            gfx->matrixmode(GL_MODELVIEW);
+            gfx->loadidentity();
+            gfx->scale(1, -1, 1);
 
-            glTranslatef(0, 0, -height);
+            gfx->translate(0, 0, -height);
             begingenshadow();
             loopi(numframes) genshadow(aasize, i, f);
             endgenshadow();
 
-            glEnable(GL_FOG);
-            glViewport(0, 0, screenw, screenh);
+            gfx->enable(GL_FOG);
+            gfx->viewport(0, 0, screenw, screenh);
 
             if(f) delete f;
         }

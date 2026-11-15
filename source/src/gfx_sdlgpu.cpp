@@ -45,7 +45,10 @@ static const char *mslcommon =
     "#include <metal_stdlib>\n"
     "using namespace metal;\n"
     "struct VSU { float4x4 mvp; float4x4 mv; float4 color; };\n"
-    "struct FSU { float4 fogcolor; float4 fog; float4 params; };\n" // fog: end, 1/(end-start), on; params: colour scale, alpha test reference (<0: off)
+    // a texture unit's combiner (texture.cpp, encodetmu()): rgb/alpha = (function, source 0, 1, 2), rgbop/alphaop = (operand 0, 1, 2, scale)
+    "struct Unit { int4 rgb; int4 rgbop; int4 alpha; int4 alphaop; float4 k; };\n"
+    // fog: end, 1/(end-start), on; params: -, alpha test reference (<0: off); units: which texture units are on
+    "struct FSU { float4 fogcolor; float4 fog; float4 params; int4 units; Unit unit[2]; };\n"
     "struct VIn\n"
     "{\n"
     "    float3 pos [[attribute(0)]];\n"
@@ -55,8 +58,57 @@ static const char *mslcommon =
     "#if HAS_COLOR\n"
     "    float4 color [[attribute(2)]];\n"
     "#endif\n"
+    "#if HAS_TC1\n"
+    "    float2 tc1 [[attribute(3)]];\n"
+    "#endif\n"
     "};\n"
-    "struct VOut { float4 pos [[position]]; float2 tc; float4 color; float fogdist; };\n";
+    "struct VOut { float4 pos [[position]]; float2 tc; float2 tc1; float4 color; float fogdist; };\n"
+    // GL_ARB_texture_env_combine
+    "static float4 source(int s, float4 t, float4 p, float4 k, float4 c) { return s == 0 ? t : (s == 1 ? p : (s == 2 ? k : c)); }\n"
+    "static float3 argrgb(int s, int op, float4 t, float4 p, float4 k, float4 c)\n"
+    "{\n"
+    "    float4 v = source(s, t, p, k, c);\n"
+    "    return op == 0 ? v.rgb : (op == 1 ? 1.0 - v.rgb : (op == 2 ? float3(v.a) : float3(1.0 - v.a)));\n"
+    "}\n"
+    "static float arga(int s, int op, float4 t, float4 p, float4 k, float4 c) { float4 v = source(s, t, p, k, c); return op == 3 ? 1.0 - v.a : v.a; }\n"
+    "static float3 combine3(int f, float3 a, float3 b, float3 c)\n"
+    "{\n"
+    "    switch(f)\n"
+    "    {\n"
+    "        case 1: return a;\n"
+    "        case 3: return a + b;\n"
+    "        case 4: return a + b - 0.5;\n"
+    "        case 5: return a*c + b*(1.0 - c);\n"
+    "        case 6: return a - b;\n"
+    "        case 7: return float3(4.0*dot(a - 0.5, b - 0.5));\n"
+    "        default: return a*b;\n"
+    "    }\n"
+    "}\n"
+    "static float combine1(int f, float a, float b, float c)\n"
+    "{\n"
+    "    switch(f)\n"
+    "    {\n"
+    "        case 1: return a;\n"
+    "        case 3: return a + b;\n"
+    "        case 4: return a + b - 0.5;\n"
+    "        case 5: return a*c + b*(1.0 - c);\n"
+    "        case 6: return a - b;\n"
+    "        default: return a*b;\n"
+    "    }\n"
+    "}\n"
+    "static float4 texunit(constant Unit &u, float4 t, float4 p, float4 c)\n"
+    "{\n"
+    "    float3 rgb = combine3(u.rgb.x, argrgb(u.rgb.y, u.rgbop.x, t, p, u.k, c), argrgb(u.rgb.z, u.rgbop.y, t, p, u.k, c), argrgb(u.rgb.w, u.rgbop.z, t, p, u.k, c)) * float(u.rgbop.w);\n"
+    "    float a = combine1(u.alpha.x, arga(u.alpha.y, u.alphaop.x, t, p, u.k, c), arga(u.alpha.z, u.alphaop.y, t, p, u.k, c), arga(u.alpha.w, u.alphaop.z, t, p, u.k, c)) * float(u.alphaop.w);\n"
+    "    return clamp(float4(rgb, a), 0.0, 1.0);\n"
+    "}\n"
+    "static float4 shade(VOut in, constant FSU &u, texture2d<float> tex0, sampler s0, texture2d<float> tex1, sampler s1)\n"
+    "{\n"
+    "    float4 c = in.color;\n"
+    "    if(u.units.x != 0) c = texunit(u.unit[0], tex0.sample(s0, in.tc), c, in.color);\n"
+    "    if(u.units.y != 0) c = texunit(u.unit[1], tex1.sample(s1, in.tc1), c, in.color);\n"
+    "    return c;\n"
+    "}\n";
 
 static const char *mslvertex =
     "vertex VOut vmain(VIn in [[stage_in]], constant VSU &u [[buffer(0)]])\n"
@@ -69,6 +121,11 @@ static const char *mslvertex =
     "#else\n"
     "    o.tc = float2(0.0);\n"
     "#endif\n"
+    "#if HAS_TC1\n"
+    "    o.tc1 = in.tc1;\n"
+    "#else\n"
+    "    o.tc1 = o.tc;\n"
+    "#endif\n"
     "#if HAS_COLOR\n"
     "    o.color = in.color;\n"
     "#else\n"
@@ -78,12 +135,12 @@ static const char *mslvertex =
     "    return o;\n"
     "}\n";
 
-// texture x colour (x 2 for the world's and models' "T * P x 2" combiner), alpha test, linear fog
+// the texture units' combiners, alpha test, linear fog
 static const char *mslfragment =
-    "fragment float4 fmain(VOut in [[stage_in]], constant FSU &u [[buffer(0)]], texture2d<float> tex [[texture(0)]], sampler smp [[sampler(0)]])\n"
+    "fragment float4 fmain(VOut in [[stage_in]], constant FSU &u [[buffer(0)]], texture2d<float> tex0 [[texture(0)]], texture2d<float> tex1 [[texture(1)]],\n"
+    "                      sampler s0 [[sampler(0)]], sampler s1 [[sampler(1)]])\n"
     "{\n"
-    "    float4 c = tex.sample(smp, in.tc) * in.color;\n"
-    "    c.rgb = min(c.rgb * u.params.x, 1.0);\n"
+    "    float4 c = shade(in, u, tex0, s0, tex1, s1);\n"
     "    if(u.params.y >= 0.0 && c.a <= u.params.y) discard_fragment();\n"
     "    if(u.fog.z > 0.5) c.rgb = mix(u.fogcolor.rgb, c.rgb, clamp((u.fog.x - in.fogdist) * u.fog.y, 0.0, 1.0));\n"
     "    return c;\n"
@@ -91,14 +148,15 @@ static const char *mslfragment =
 
 // crosshair pick pass: the depth of the nearest fragment, written to an R32F target (alpha-tested skins still cut out)
 static const char *mslpick =
-    "fragment float fpick(VOut in [[stage_in]], constant FSU &u [[buffer(0)]], texture2d<float> tex [[texture(0)]], sampler smp [[sampler(0)]])\n"
+    "fragment float fpick(VOut in [[stage_in]], constant FSU &u [[buffer(0)]], texture2d<float> tex0 [[texture(0)]], texture2d<float> tex1 [[texture(1)]],\n"
+    "                     sampler s0 [[sampler(0)]], sampler s1 [[sampler(1)]])\n"
     "{\n"
-    "    if(u.params.y >= 0.0 && tex.sample(smp, in.tc).a * in.color.a <= u.params.y) discard_fragment();\n"
+    "    if(u.params.y >= 0.0 && shade(in, u, tex0, s0, tex1, s1).a <= u.params.y) discard_fragment();\n"
     "    return in.pos.z;\n"
     "}\n";
 
-// the same shaders in GLSL 450 for Vulkan (SDL GPU's SPIR-V resource sets: vertex uniforms in set 1, fragment samplers
-// in set 2, fragment uniforms in set 3)
+// The same shaders in GLSL 450 for Vulkan (SDL GPU's SPIR-V resource sets: vertex uniforms in set 1, fragment samplers
+// in set 2, fragment uniforms in set 3). Not compiled yet (no SPIR-V compiler in the build); kept in step with the MSL.
 const char *gpuglslsources[] =
 {
     "#version 450\n"
@@ -109,10 +167,14 @@ const char *gpuglslsources[] =
     "#if HAS_COLOR\n"
     "layout(location = 2) in vec4 color;\n"
     "#endif\n"
+    "#if HAS_TC1\n"
+    "layout(location = 3) in vec2 tc1;\n"
+    "#endif\n"
     "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; };\n"
     "layout(location = 0) out vec2 otc;\n"
-    "layout(location = 1) out vec4 ocolor;\n"
-    "layout(location = 2) out float ofogdist;\n"
+    "layout(location = 1) out vec2 otc1;\n"
+    "layout(location = 2) out vec4 ocolor;\n"
+    "layout(location = 3) out float ofogdist;\n"
     "void main()\n"
     "{\n"
     "    vec4 p = vec4(pos, 1.0);\n"
@@ -121,6 +183,11 @@ const char *gpuglslsources[] =
     "    otc = tc;\n"
     "#else\n"
     "    otc = vec2(0.0);\n"
+    "#endif\n"
+    "#if HAS_TC1\n"
+    "    otc1 = tc1;\n"
+    "#else\n"
+    "    otc1 = otc;\n"
     "#endif\n"
     "#if HAS_COLOR\n"
     "    ocolor = color;\n"
@@ -131,37 +198,45 @@ const char *gpuglslsources[] =
     "}\n",
 
     "#version 450\n"
+    "struct Unit { ivec4 rgb; ivec4 rgbop; ivec4 alpha; ivec4 alphaop; vec4 k; };\n"
     "layout(location = 0) in vec2 tc;\n"
-    "layout(location = 1) in vec4 color;\n"
-    "layout(location = 2) in float fogdist;\n"
-    "layout(set = 2, binding = 0) uniform sampler2D tex;\n"
-    "layout(set = 3, binding = 0) uniform FSU { vec4 fogcolor; vec4 fog; vec4 params; };\n"
+    "layout(location = 1) in vec2 tc1;\n"
+    "layout(location = 2) in vec4 color;\n"
+    "layout(location = 3) in float fogdist;\n"
+    "layout(set = 2, binding = 0) uniform sampler2D tex0;\n"
+    "layout(set = 2, binding = 1) uniform sampler2D tex1;\n"
+    "layout(set = 3, binding = 0) uniform FSU { vec4 fogcolor; vec4 fog; vec4 params; ivec4 units; Unit unit[2]; };\n"
     "layout(location = 0) out vec4 ocolor;\n"
+    "vec4 source(int s, vec4 t, vec4 p, vec4 k, vec4 c) { return s == 0 ? t : (s == 1 ? p : (s == 2 ? k : c)); }\n"
+    "vec3 argrgb(int s, int op, vec4 t, vec4 p, vec4 k, vec4 c) { vec4 v = source(s, t, p, k, c); return op == 0 ? v.rgb : (op == 1 ? 1.0 - v.rgb : (op == 2 ? vec3(v.a) : vec3(1.0 - v.a))); }\n"
+    "float arga(int s, int op, vec4 t, vec4 p, vec4 k, vec4 c) { vec4 v = source(s, t, p, k, c); return op == 3 ? 1.0 - v.a : v.a; }\n"
+    "vec3 combine3(int f, vec3 a, vec3 b, vec3 c) { return f == 1 ? a : (f == 3 ? a + b : (f == 4 ? a + b - 0.5 : (f == 5 ? a*c + b*(1.0 - c) : (f == 6 ? a - b : (f == 7 ? vec3(4.0*dot(a - 0.5, b - 0.5)) : a*b))))); }\n"
+    "float combine1(int f, float a, float b, float c) { return f == 1 ? a : (f == 3 ? a + b : (f == 4 ? a + b - 0.5 : (f == 5 ? a*c + b*(1.0 - c) : (f == 6 ? a - b : a*b)))); }\n"
+    "vec4 texunit(Unit u, vec4 t, vec4 p, vec4 c)\n"
+    "{\n"
+    "    vec3 rgb = combine3(u.rgb.x, argrgb(u.rgb.y, u.rgbop.x, t, p, u.k, c), argrgb(u.rgb.z, u.rgbop.y, t, p, u.k, c), argrgb(u.rgb.w, u.rgbop.z, t, p, u.k, c)) * float(u.rgbop.w);\n"
+    "    float a = combine1(u.alpha.x, arga(u.alpha.y, u.alphaop.x, t, p, u.k, c), arga(u.alpha.z, u.alphaop.y, t, p, u.k, c), arga(u.alpha.w, u.alphaop.z, t, p, u.k, c)) * float(u.alphaop.w);\n"
+    "    return clamp(vec4(rgb, a), 0.0, 1.0);\n"
+    "}\n"
     "void main()\n"
     "{\n"
-    "    vec4 c = texture(tex, tc) * color;\n"
-    "    c.rgb = min(c.rgb * params.x, 1.0);\n"
+    "    vec4 c = color;\n"
+    "    if(units.x != 0) c = texunit(unit[0], texture(tex0, tc), c, color);\n"
+    "    if(units.y != 0) c = texunit(unit[1], texture(tex1, tc1), c, color);\n"
+    "#if PICK\n"
+    "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
+    "    ocolor = vec4(gl_FragCoord.z);\n"
+    "#else\n"
     "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
     "    if(fog.z > 0.5) c.rgb = mix(fogcolor.rgb, c.rgb, clamp((fog.x - fogdist) * fog.y, 0.0, 1.0));\n"
     "    ocolor = c;\n"
-    "}\n",
-
-    "#version 450\n"
-    "layout(location = 0) in vec2 tc;\n"
-    "layout(location = 1) in vec4 color;\n"
-    "layout(location = 2) in float fogdist;\n"
-    "layout(set = 2, binding = 0) uniform sampler2D tex;\n"
-    "layout(set = 3, binding = 0) uniform FSU { vec4 fogcolor; vec4 fog; vec4 params; };\n"
-    "layout(location = 0) out float odepth;\n"
-    "void main()\n"
-    "{\n"
-    "    if(params.y >= 0.0 && texture(tex, tc).a * color.a <= params.y) discard;\n"
-    "    odepth = gl_FragCoord.z;\n"
+    "#endif\n"
     "}\n",
 };
 
 struct vsuniforms { float mvp[16], mv[16], color[4]; };
-struct fsuniforms { float fogcolor[4], fog[4], params[4]; };
+struct gpuunit { int rgb[4], rgbop[4], alpha[4], alphaop[4]; float k[4]; };
+struct fsuniforms { float fogcolor[4], fog[4], params[4]; int units[4]; gpuunit unit[2]; };
 
 // --- resources
 
@@ -181,7 +256,7 @@ struct gpubuffer
     bool dirty, used;
 };
 
-enum { ATTR_POS = 0, ATTR_TC, ATTR_COLOR, NUMATTRS };
+enum { ATTR_POS = 0, ATTR_TC, ATTR_COLOR, ATTR_TC1, NUMATTRS }; // (ATTR_TC1: texture unit 1's coordinates)
 enum { TARGET_MAIN = 0, TARGET_PICK };
 
 struct gpuarray { bool enabled; GLint size; GLenum type; GLsizei stride; const void *ptr; GLuint buffer; };
@@ -218,8 +293,8 @@ struct gpudraw
     uchar ibsrc;                // SRC_BUFFER (16-bit, a GL element buffer) or SRC_ARENA (32-bit)
     GLuint ibbuffer;
     uint firstindex, numindices;
-    GLuint tex;                 // 0: white
-    int samplerkey;
+    GLuint tex[2];              // texture units 0 and 1 (0: white)
+    int samplerkey[2];
     float viewport[4];          // x, y (from the top), w, h
     vsuniforms vs;
     fsuniforms fs;
@@ -254,7 +329,7 @@ struct sdlgpubackend : gfxdevice
     float alpharef, offsetfactor, offsetunits;
     bool depthwrite, colormaskbits[4];
     int viewportv[4];
-    int activetex;
+    int activetex, clientunit;
     GLuint boundtex[4];
     GLuint arraybuffer, elementbuffer;
     gpuarray arrays[NUMATTRS];
@@ -270,12 +345,12 @@ struct sdlgpubackend : gfxdevice
     vector<int> freetextures;
     vector<gpubuffer> buffers;
     vector<int> freebuffers;
-    SDL_GPUTexture *whitetex;
+    SDL_GPUTexture *emptytex;
     vector<SDL_GPUSampler *> samplers;
     vector<samplerkey> samplerkeys;
     hashtable<pipelinekey, int> pipelineindex;
     vector<SDL_GPUGraphicsPipeline *> pipelines;
-    SDL_GPUShader *vshaders[4], *fshader, *pickshader;
+    SDL_GPUShader *vshaders[8], *fshader, *pickshader;
 
     // the frame being recorded
     bool recording;
@@ -299,12 +374,12 @@ struct sdlgpubackend : gfxdevice
 
     sdlgpubackend() : dev(NULL), window(NULL), format(SDL_GPU_SHADERFORMAT_INVALID), samples(1), depthbits(32),
         depthformat(SDL_GPU_TEXTUREFORMAT_D32_FLOAT), samplecount(SDL_GPU_SAMPLECOUNT_1), matrixmodeidx(0), activetex(0),
-        arraybuffer(0), elementbuffer(0), immmode(0), whitetex(NULL), fshader(NULL), pickshader(NULL), recording(false),
+        arraybuffer(0), elementbuffer(0), immmode(0), emptytex(NULL), fshader(NULL), pickshader(NULL), recording(false),
         curpass(-1), texuploadbytes(0), colortex(NULL), msaatex(NULL), depthtex(NULL), pickcolor(NULL), pickdepth(NULL),
         targetw(0), targeth(0), arenavb(NULL), arenaib(NULL), arenavbsize(0), arenaibsize(0), pickdownload(NULL),
-        pickfence(NULL), pickpending(false)
+        pickfence(NULL), pickpending(false), frameupload(NULL), frameuploadsize(0)
     {
-        loopi(4) vshaders[i] = NULL;
+        loopi(8) vshaders[i] = NULL;
         resetstate();
         textures.add(); // handle 0: no texture
         memset(&textures[0], 0, sizeof(gputexture));
@@ -329,7 +404,7 @@ struct sdlgpubackend : gfxdevice
         depthwrite = true;
         loopi(4) colormaskbits[i] = true;
         loopi(4) viewportv[i] = 0;
-        activetex = 0;
+        activetex = clientunit = 0;
         loopi(4) boundtex[i] = 0;
         loopi(NUMATTRS) { memset(&arrays[i], 0, sizeof(gpuarray)); }
     }
@@ -394,7 +469,7 @@ struct sdlgpubackend : gfxdevice
             samples = 1 << int(want);
         }
 
-        // a white texture for untextured drawing
+        // the texture of units without one (texture 0, or one without an image): black, as GL samples an incomplete texture
         SDL_GPUTextureCreateInfo ti;
         memset(&ti, 0, sizeof(ti));
         ti.type = SDL_GPU_TEXTURETYPE_2D;
@@ -403,10 +478,11 @@ struct sdlgpubackend : gfxdevice
         ti.width = ti.height = 1;
         ti.layer_count_or_depth = 1;
         ti.num_levels = 1;
-        whitetex = SDL_CreateGPUTexture(dev, &ti);
+        emptytex = SDL_CreateGPUTexture(dev, &ti);
         texupload *u = new texupload;
         u->tex = (GLuint)-1; u->level = 0; u->w = u->h = 1;
-        loopi(4) u->rgba.add(255);
+        loopi(3) u->rgba.add(0);
+        u->rgba.add(255);
         texuploads.add(u);
         texuploadbytes += 4;
 
@@ -461,9 +537,9 @@ struct sdlgpubackend : gfxdevice
 
     // --- shaders and pipelines
 
-    SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, bool hastc, bool hascolor, int samplers, int uniforms)
+    SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, int variant, int samplers, int uniforms)
     {
-        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n", hastc ? 1 : 0, hascolor ? 1 : 0);
+        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n", variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0);
         vector<char> src;
         src.put(defs, strlen(defs));
         src.put(mslcommon, strlen(mslcommon));
@@ -486,9 +562,9 @@ struct sdlgpubackend : gfxdevice
     bool loadshaders()
     {
         if(fshader) return true;
-        loopi(4) if(!(vshaders[i] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, (i&1) != 0, (i&2) != 0, 0, 1))) return false;
-        fshader = makeshader(mslfragment, "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, true, true, 1, 1);
-        pickshader = makeshader(mslpick, "fpick", SDL_GPU_SHADERSTAGE_FRAGMENT, true, true, 1, 1);
+        loopi(8) if(!(vshaders[i] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, i, 0, 1))) return false;
+        fshader = makeshader(mslfragment, "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2, 1);
+        pickshader = makeshader(mslpick, "fpick", SDL_GPU_SHADERSTAGE_FRAGMENT, 7, 2, 1);
         return fshader && pickshader;
     }
 
@@ -547,7 +623,7 @@ struct sdlgpubackend : gfxdevice
             va[n].offset = 0;
             n++;
         }
-        bool hastc = k.attrs[ATTR_TC] != 0, hascolor = k.attrs[ATTR_COLOR] != 0;
+        int variant = (k.attrs[ATTR_TC] ? 1 : 0) | (k.attrs[ATTR_COLOR] ? 2 : 0) | (k.attrs[ATTR_TC1] ? 4 : 0);
 
         SDL_GPUColorTargetDescription ctd;
         memset(&ctd, 0, sizeof(ctd));
@@ -565,7 +641,7 @@ struct sdlgpubackend : gfxdevice
 
         SDL_GPUGraphicsPipelineCreateInfo pi;
         memset(&pi, 0, sizeof(pi));
-        pi.vertex_shader = vshaders[(hastc ? 1 : 0) | (hascolor ? 2 : 0)];
+        pi.vertex_shader = vshaders[variant];
         pi.fragment_shader = k.target == TARGET_PICK ? pickshader : fshader;
         pi.vertex_input_state.vertex_buffer_descriptions = vbd;
         pi.vertex_input_state.num_vertex_buffers = n;
@@ -590,8 +666,8 @@ struct sdlgpubackend : gfxdevice
         pi.target_info.has_depth_stencil_target = true;
         SDL_GPUGraphicsPipeline *p = SDL_CreateGPUGraphicsPipeline(dev, &pi);
         if(!p) conoutf("\f3SDL GPU: pipeline creation failed: %s", SDL_GetError());
-        else if(gpudebug) conoutf("SDL GPU: pipeline %d (target %d, topology %d, attributes %d/%d/%d, blend %d, depth %d/%d/%d, cull %d)",
-            pipelines.length(), k.target, k.topology, k.attrs[0], k.attrs[1], k.attrs[2], k.blend, k.depthtest, k.depthfunc, k.depthwrite, k.cull);
+        else if(gpudebug) conoutf("SDL GPU: pipeline %d (target %d, topology %d, attributes %d/%d/%d/%d, blend %d, depth %d/%d/%d, cull %d)",
+            pipelines.length(), k.target, k.topology, k.attrs[0], k.attrs[1], k.attrs[2], k.attrs[3], k.blend, k.depthtest, k.depthfunc, k.depthwrite, k.cull);
         pipelines.add(p);
         pipelineindex[k] = pipelines.length() - 1;
         return p ? pipelines.length() - 1 : -1;
@@ -621,7 +697,6 @@ struct sdlgpubackend : gfxdevice
             default: return 15;
         }
     }
-    bool texturing() { return texenabled[0]; } // (only texture unit 0 is implemented)
 
     void enable(GLenum cap) { if(cap == GL_TEXTURE_2D) texenabled[activetex] = true; else caps[capindex(cap)] = true; }
     void disable(GLenum cap) { if(cap == GL_TEXTURE_2D) texenabled[activetex] = false; else caps[capindex(cap)] = false; }
@@ -637,6 +712,7 @@ struct sdlgpubackend : gfxdevice
     void color3f(GLfloat r, GLfloat g, GLfloat b) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = 1; }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = a; }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { color3f(r/255.0f, g/255.0f, b/255.0f); }
+    void color4ub(GLubyte r, GLubyte g, GLubyte b, GLubyte a) { color4f(r/255.0f, g/255.0f, b/255.0f, a/255.0f); }
     void fogi(GLenum pname, GLint v) { fogf(pname, float(v)); }
     void fogf(GLenum pname, GLfloat v) { if(pname == GL_FOG_START) fogstart = v; else if(pname == GL_FOG_END) fogend = v; }
     void fogfv(GLenum pname, const GLfloat *v) { if(pname == GL_FOG_COLOR) loopi(4) fogcolor[i] = v[i]; else if(v) fogf(pname, v[0]); }
@@ -646,6 +722,7 @@ struct sdlgpubackend : gfxdevice
     void texenvi(GLenum pname, GLint v) {}             // the combiners are read from texture.cpp's tmus (tmuismodulate2x)
     void texenvfv(GLenum pname, const GLfloat *v) {}
     void activetexture(GLenum unit) { activetex = clamp(int(unit - GL_TEXTURE0_ARB), 0, 3); }
+    void clientactivetexture(GLenum unit) { clientunit = clamp(int(unit - GL_TEXTURE0_ARB), 0, 3); }
     void getintegerv(GLenum pname, GLint *v)
     {
         switch(pname)
@@ -904,7 +981,16 @@ struct sdlgpubackend : gfxdevice
 
     // --- vertex arrays
 
-    int arrayindex(GLenum array) { return array == GL_VERTEX_ARRAY ? ATTR_POS : (array == GL_TEXTURE_COORD_ARRAY ? ATTR_TC : (array == GL_COLOR_ARRAY ? ATTR_COLOR : -1)); }
+    int arrayindex(GLenum array)
+    {
+        switch(array)
+        {
+            case GL_VERTEX_ARRAY: return ATTR_POS;
+            case GL_COLOR_ARRAY: return ATTR_COLOR;
+            case GL_TEXTURE_COORD_ARRAY: return clientunit == 0 ? ATTR_TC : (clientunit == 1 ? ATTR_TC1 : -1);
+            default: return -1;
+        }
+    }
     void enableclientstate(GLenum array) { int i = arrayindex(array); if(i >= 0) arrays[i].enabled = true; }
     void disableclientstate(GLenum array) { int i = arrayindex(array); if(i >= 0) arrays[i].enabled = false; }
     void setarray(int i, GLint size, GLenum type, GLsizei stride, const void *p)
@@ -915,7 +1001,7 @@ struct sdlgpubackend : gfxdevice
     }
     void vertexpointer(GLint size, GLenum type, GLsizei stride, const void *p) { setarray(ATTR_POS, size, type, stride, p); }
     void colorpointer(GLint size, GLenum type, GLsizei stride, const void *p) { setarray(ATTR_COLOR, size, type, stride, p); }
-    void texcoordpointer(GLint size, GLenum type, GLsizei stride, const void *p) { setarray(ATTR_TC, size, type, stride, p); }
+    void texcoordpointer(GLint size, GLenum type, GLsizei stride, const void *p) { if(clientunit <= 1) setarray(clientunit ? ATTR_TC1 : ATTR_TC, size, type, stride, p); }
 
     static SDL_GPUVertexElementFormat elementformat(int attr, GLint size, GLenum type)
     {
@@ -1041,7 +1127,7 @@ struct sdlgpubackend : gfxdevice
         else loopi(NUMATTRS)
         {
             gpuarray &a = arrays[i];
-            if(!a.enabled || (i == ATTR_TC && !texturing())) continue;
+            if(!a.enabled || (i == ATTR_TC && !texenabled[0]) || (i == ATTR_TC1 && !texenabled[1])) continue;
             k.attrs[i] = elementformat(i, a.size, a.type);
             k.pitch[i] = a.stride;
             if(a.buffer)
@@ -1086,11 +1172,22 @@ struct sdlgpubackend : gfxdevice
         d.pipeline = getpipeline(k);
         if(d.pipeline < 0) { draws.pop(); return; }
 
-        // texture and uniforms
-        bool tex = texturing() && k.attrs[ATTR_TC];
-        d.tex = tex ? boundtex[0] : 0;
-        if(d.tex && (d.tex >= (GLuint)textures.length() || !textures[d.tex].tex)) d.tex = 0;
-        d.samplerkey = d.tex ? getsampler(textures[d.tex]) : getsampler(textures[0]);
+        // textures (units 0 and 1, with their combiners) and uniforms
+        loopi(2)
+        {
+            GLuint t = texenabled[i] ? boundtex[i] : 0;
+            if(t && (t >= (GLuint)textures.length() || !textures[t].tex)) t = 0;
+            d.tex[i] = t;
+            d.samplerkey[i] = getsampler(textures[t]);
+            d.fs.units[i] = texenabled[i] ? 1 : 0;
+            extern void encodetmu(int n, int *rgb, int *alpha, float *color);
+            gpuunit &u = d.fs.unit[i];
+            int rgb[8], alpha[8];
+            encodetmu(i, rgb, alpha, u.k);
+            loopj(4) { u.rgb[j] = rgb[j]; u.alpha[j] = alpha[j]; }
+            loopj(3) { u.rgbop[j] = rgb[4+j]; u.alphaop[j] = alpha[4+j]; }
+            u.rgbop[3] = rgb[7]; u.alphaop[3] = alpha[7];
+        }
 
         gmat proj = stacks[1][stackpos[1]], mv = stacks[0][stackpos[0]], zfix, pm, mvp;
         zfix.identity();
@@ -1104,10 +1201,7 @@ struct sdlgpubackend : gfxdevice
         d.fs.fog[0] = fogend;
         d.fs.fog[1] = fogend != fogstart ? 1.0f/(fogend - fogstart) : 0;
         d.fs.fog[2] = !picking && caps[capindex(GL_FOG)] ? 1 : 0;
-        extern bool tmuismodulate2x(int n);
-        d.fs.params[0] = tex && tmuismodulate2x(0) ? 2 : 1;
         d.fs.params[1] = caps[capindex(GL_ALPHA_TEST)] && alphafn == GL_GREATER ? alpharef : -1;
-        if(picking && !tex) d.fs.params[1] = -1;
 
         // viewport, from the top
         int th = picking ? 1 : targeth;
@@ -1140,8 +1234,8 @@ struct sdlgpubackend : gfxdevice
             case GL_QUADS:
                 for(int i = 0; i + 3 < count; i += 4)
                 {
-                    indexarena.add(o+i); indexarena.add(o+i+1); indexarena.add(o+i+2);
-                    indexarena.add(o+i); indexarena.add(o+i+2); indexarena.add(o+i+3);
+                    indexarena.add(o+i); indexarena.add(o+i+1); indexarena.add(o+i+3);
+                    indexarena.add(o+i+1); indexarena.add(o+i+2); indexarena.add(o+i+3);
                 }
                 break;
             case GL_LINE_STRIP:
@@ -1223,6 +1317,7 @@ struct sdlgpubackend : gfxdevice
 
     void begin(GLenum mode) { immmode = mode; immverts.setsize(0); }
     void texcoord2f(GLfloat s, GLfloat t) { immtc[0] = s; immtc[1] = t; }
+    void texcoord2i(GLint s, GLint t) { texcoord2f(float(s), float(t)); }
     void vertex3f(GLfloat x, GLfloat y, GLfloat z)
     {
         immvert &v = immverts.add();
@@ -1231,6 +1326,7 @@ struct sdlgpubackend : gfxdevice
         loopi(4) v.color[i] = curcolor[i];
     }
     void vertex2f(GLfloat x, GLfloat y) { vertex3f(x, y, 0); }
+    void vertex3fv(const GLfloat *v) { vertex3f(v[0], v[1], v[2]); }
     void end()
     {
         if(immverts.empty()) return;
@@ -1238,9 +1334,7 @@ struct sdlgpubackend : gfxdevice
         uint start = indexarena.length();
         listindices(immmode, 0, immverts.length(), 0);
         // immediate-mode vertices always carry a texture coordinate and a colour (the current ones)
-        bool keeptex = texturing();
         record(immmode, 0, immverts.length(), start, indexarena.length() - start, false, 0, true);
-        (void)keeptex;
         immverts.setsize(0);
     }
 
@@ -1295,7 +1389,7 @@ struct sdlgpubackend : gfxdevice
         loopv(texuploads)
         {
             texupload &u = *texuploads[i];
-            SDL_GPUTexture *t = u.tex == (GLuint)-1 ? whitetex : (u.tex < (GLuint)textures.length() ? textures[u.tex].tex : NULL);
+            SDL_GPUTexture *t = u.tex == (GLuint)-1 ? emptytex : (u.tex < (GLuint)textures.length() ? textures[u.tex].tex : NULL);
             if(t)
             {
                 SDL_GPUTextureTransferInfo src = { tb, off, (Uint32)u.w, (Uint32)u.h };
@@ -1336,18 +1430,47 @@ struct sdlgpubackend : gfxdevice
         return SDL_CreateGPUBuffer(dev, &bi);
     }
 
-    void upload(SDL_GPUCopyPass *copy, SDL_GPUBuffer *buf, const void *data, uint size, bool cycle)
+    // the frame's buffer uploads all go through one transfer buffer, kept from frame to frame (mapped with cycling,
+    // so frames still in flight keep theirs)
+    struct pendingupload { SDL_GPUBuffer *buf; const void *data; uint size, offset; };
+    vector<pendingupload> pendinguploads;
+    SDL_GPUTransferBuffer *frameupload;
+    uint frameuploadsize;
+
+    void upload(SDL_GPUBuffer *buf, const void *data, uint size)
     {
-        if(!size) return;
-        SDL_GPUTransferBufferCreateInfo tbi = { SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, size, 0 };
-        SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &tbi);
-        void *p = SDL_MapGPUTransferBuffer(dev, tb, false);
-        memcpy(p, data, size);
-        SDL_UnmapGPUTransferBuffer(dev, tb);
-        SDL_GPUTransferBufferLocation src = { tb, 0 };
-        SDL_GPUBufferRegion dst = { buf, 0, size };
-        SDL_UploadToGPUBuffer(copy, &src, &dst, cycle);
-        SDL_ReleaseGPUTransferBuffer(dev, tb);
+        if(!size || !buf) return;
+        pendingupload &u = pendinguploads.add();
+        u.buf = buf; u.data = data; u.size = size;
+        u.offset = pendinguploads.length() > 1 ? (pendinguploads[pendinguploads.length()-2].offset + pendinguploads[pendinguploads.length()-2].size + 15) & ~15U : 0;
+    }
+
+    void flushbufferuploads(SDL_GPUCopyPass *copy)
+    {
+        if(pendinguploads.empty()) return;
+        const pendingupload &last = pendinguploads.last();
+        uint total = last.offset + last.size;
+        if(!frameupload || frameuploadsize < total)
+        {
+            if(frameupload) SDL_ReleaseGPUTransferBuffer(dev, frameupload);
+            frameuploadsize = max(frameuploadsize ? frameuploadsize : 1U<<20, 1U<<16);
+            while(frameuploadsize < total) frameuploadsize *= 2;
+            SDL_GPUTransferBufferCreateInfo tbi = { SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, frameuploadsize, 0 };
+            frameupload = SDL_CreateGPUTransferBuffer(dev, &tbi);
+        }
+        uchar *p = (uchar *)SDL_MapGPUTransferBuffer(dev, frameupload, true);
+        if(p)
+        {
+            loopv(pendinguploads) memcpy(p + pendinguploads[i].offset, pendinguploads[i].data, pendinguploads[i].size);
+            SDL_UnmapGPUTransferBuffer(dev, frameupload);
+            loopv(pendinguploads)
+            {
+                SDL_GPUTransferBufferLocation src = { frameupload, pendinguploads[i].offset };
+                SDL_GPUBufferRegion dst = { pendinguploads[i].buf, 0, pendinguploads[i].size };
+                SDL_UploadToGPUBuffer(copy, &src, &dst, true);
+            }
+        }
+        pendinguploads.setsize(0);
     }
 
     SDL_GPUBuffer *drawbuffer(uchar src, GLuint idx)
@@ -1380,8 +1503,8 @@ struct sdlgpubackend : gfxdevice
         dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
         SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
         if(!rp) return;
-        int lastpipeline = -1, lastsampler = -1;
-        GLuint lasttex = ~0U;
+        int lastpipeline = -1, lastsampler[2] = { -1, -1 };
+        GLuint lasttex[2] = { ~0U, ~0U };
         float lastvp[4] = { -1, -1, -1, -1 };
         loopi(p.numdraws)
         {
@@ -1401,11 +1524,16 @@ struct sdlgpubackend : gfxdevice
             SDL_GPUBufferBinding ib = { d.ibsrc == SRC_ARENA ? arenaib : drawbuffer(SRC_BUFFER, d.ibbuffer), 0 };
             if(!ib.buffer) continue;
             SDL_BindGPUIndexBuffer(rp, &ib, d.ibsrc == SRC_ARENA ? SDL_GPU_INDEXELEMENTSIZE_32BIT : SDL_GPU_INDEXELEMENTSIZE_16BIT);
-            if(d.tex != lasttex || d.samplerkey != lastsampler)
+            if(d.tex[0] != lasttex[0] || d.samplerkey[0] != lastsampler[0] || d.tex[1] != lasttex[1] || d.samplerkey[1] != lastsampler[1])
             {
-                SDL_GPUTextureSamplerBinding tsb = { d.tex ? textures[d.tex].tex : whitetex, samplers[d.samplerkey] };
-                SDL_BindGPUFragmentSamplers(rp, 0, &tsb, 1);
-                lasttex = d.tex; lastsampler = d.samplerkey;
+                SDL_GPUTextureSamplerBinding tsb[2];
+                loopj(2)
+                {
+                    tsb[j].texture = d.tex[j] ? textures[d.tex[j]].tex : emptytex;
+                    tsb[j].sampler = samplers[d.samplerkey[j]];
+                    lasttex[j] = d.tex[j]; lastsampler[j] = d.samplerkey[j];
+                }
+                SDL_BindGPUFragmentSamplers(rp, 0, tsb, 2);
             }
             SDL_PushGPUVertexUniformData(cmd, 0, &d.vs, sizeof(d.vs));
             SDL_PushGPUFragmentUniformData(cmd, 0, &d.fs, sizeof(d.fs));
@@ -1414,7 +1542,11 @@ struct sdlgpubackend : gfxdevice
         SDL_EndGPURenderPass(rp);
     }
 
-    void present()
+    void present() { submitframe(true); }
+
+    // submits the recorded frame; show: also copies it to the swapchain (present()), else it's only rendered into the
+    // offscreen target, for readpixels()
+    void submitframe(bool show)
     {
         if(!dev) return;
         extern int screenw, screenh;
@@ -1437,11 +1569,12 @@ struct sdlgpubackend : gfxdevice
                 b.buf = SDL_CreateGPUBuffer(dev, &bi);
                 b.size = b.data.length();
             }
-            upload(copy, b.buf, b.data.getbuf(), b.data.length(), true);
+            upload(b.buf, b.data.getbuf(), b.data.length());
             b.dirty = false;
         }
-        if(vertexarena.length()) { arenavb = growbuffer(arenavb, arenavbsize, vertexarena.length()); upload(copy, arenavb, vertexarena.getbuf(), vertexarena.length(), true); }
-        if(indexarena.length()) { arenaib = growbuffer(arenaib, arenaibsize, indexarena.length()*sizeof(uint)); upload(copy, arenaib, indexarena.getbuf(), indexarena.length()*sizeof(uint), true); }
+        if(vertexarena.length()) { arenavb = growbuffer(arenavb, arenavbsize, vertexarena.length()); upload(arenavb, vertexarena.getbuf(), vertexarena.length()); }
+        if(indexarena.length()) { arenaib = growbuffer(arenaib, arenaibsize, indexarena.length()*sizeof(uint)); upload(arenaib, indexarena.getbuf(), indexarena.length()*sizeof(uint)); }
+        flushbufferuploads(copy);
         SDL_EndGPUCopyPass(copy);
 
         bool picked = false;
@@ -1466,7 +1599,7 @@ struct sdlgpubackend : gfxdevice
         loopv(passes) if(passes[i].target == TARGET_MAIN) runpass(cmd, passes[i]);
         SDL_GPUTexture *swap = NULL;
         Uint32 sw = 0, sh = 0;
-        if(!benchnopresent && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, window, &swap, &sw, &sh) && swap)
+        if(show && !benchnopresent && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, window, &swap, &sw, &sh) && swap)
         {
             SDL_GPUBlitInfo bi;
             memset(&bi, 0, sizeof(bi));
@@ -1481,9 +1614,11 @@ struct sdlgpubackend : gfxdevice
         curpass = -1;
     }
 
-    // screenshots: the last presented frame, as glReadPixels() would return it (bottom row first)
+    // as glReadPixels() would return it (bottom row first): the frame being recorded (which is submitted for this, e.g.
+    // by the blob shadow generation in vertmodel.h), or else the last frame (screenshots)
     void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data)
     {
+        if(recording) submitframe(false);
         if(!dev || !colortex || w <= 0 || h <= 0) return;
         SDL_GPUTransferBufferCreateInfo tbi = { SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, (Uint32)(w*h*4), 0 };
         SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &tbi);
@@ -1501,11 +1636,11 @@ struct sdlgpubackend : gfxdevice
         const uchar *p = (const uchar *)SDL_MapGPUTransferBuffer(dev, tb, false);
         if(p)
         {
-            int bpp = format == GL_RGBA ? 4 : 3;
+            int bpp = format == GL_RGBA ? 4 : (format == GL_RGB ? 3 : 1), first = format == GL_ALPHA ? 3 : (format == GL_GREEN ? 1 : (format == GL_BLUE ? 2 : 0));
             uchar *out = (uchar *)data;
             loop(row, h)
             {
-                const uchar *s = p + (h - 1 - row)*w*4;
+                const uchar *s = p + (h - 1 - row)*w*4 + first;
                 loop(col, w) { loopk(bpp) out[k] = s[k]; out += bpp; s += 4; }
             }
             SDL_UnmapGPUTransferBuffer(dev, tb);

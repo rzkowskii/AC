@@ -822,6 +822,30 @@ bool tmuismodulate2x(int n)
            t.alpha.sources[1] == GL_PREVIOUS_ARB && t.alpha.ops[1] == GL_SRC_ALPHA;
 }
 
+// texture unit n's combiner, for the GPU backend's shader (gfx_sdlgpu.cpp), which emulates GL_ARB_texture_env_combine:
+// rgb/alpha[0] = function (1 replace, 2 modulate, 3 add, 4 add signed, 5 interpolate, 6 subtract, 7 dot3),
+// [1..3] = sources (0 texture, 1 previous, 2 constant, 3 primary colour), [4..6] = operands (0 colour, 1 1-colour,
+// 2 alpha, 3 1-alpha), [7] = scale. The GL_MODULATE texture environment is written as the equivalent combiner.
+static int encodecombine(GLenum c) { switch(c) { case GL_REPLACE: return 1; case GL_MODULATE: return 2; case GL_ADD: return 3; case GL_ADD_SIGNED_ARB: return 4;
+    case GL_INTERPOLATE_ARB: return 5; case GL_SUBTRACT_ARB: return 6; case GL_DOT3_RGB_ARB: return 7; default: return 2; } }
+static int encodesource(GLenum s) { switch(s) { case GL_TEXTURE: return 0; case GL_CONSTANT_ARB: return 2; case GL_PRIMARY_COLOR_ARB: return 3; default: return 1; } }
+static int encodeoperand(GLenum o) { switch(o) { case GL_ONE_MINUS_SRC_COLOR: return 1; case GL_SRC_ALPHA: return 2; case GL_ONE_MINUS_SRC_ALPHA: return 3; default: return 0; } }
+
+void encodetmu(int n, int *rgb, int *alpha, float *color)
+{
+    static const tmu modulate = INITTMU;
+    const tmu &t = n < maxtmus && tmus[n].mode == GL_COMBINE_ARB ? tmus[n] : modulate;
+    const tmufunc *f[2] = { &t.rgb, &t.alpha };
+    int *out[2] = { rgb, alpha };
+    loopk(2)
+    {
+        out[k][0] = encodecombine(f[k]->combine);
+        loopi(3) { out[k][1+i] = encodesource(f[k]->sources[i]); out[k][4+i] = encodeoperand(f[k]->ops[i]); }
+        out[k][7] = max(f[k]->scale, 1);
+    }
+    loopi(4) color[i] = n < maxtmus ? tmus[n].color[i] : 0;
+}
+
 void committmu(int n, tmu &f)
 {
     if(n>=maxtmus) return;

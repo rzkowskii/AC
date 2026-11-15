@@ -63,7 +63,7 @@ GLuint createexpmodtex(int size, float minval)
         *dst++ = uchar(max(z, minval)*255);
     }
     GLuint tex = 0;
-    glGenTextures(1, &tex);
+    gfx->gentextures(1, &tex);
     createtexture(tex, size, size, data, 3, true, false, GL_ALPHA);
     delete[] data;
     return tex;
@@ -105,25 +105,25 @@ void setupexplosion()
         }
     }
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, sizeof(expvert), &expverts->pos);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(expvert), &expverts->u);
+    gfx->enableclientstate(GL_VERTEX_ARRAY);
+    gfx->vertexpointer(3, GL_FLOAT, sizeof(expvert), &expverts->pos);
+    gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+    gfx->texcoordpointer(2, GL_FLOAT, sizeof(expvert), &expverts->u);
 
     if(mtexplosion && maxtmus>=2)
     {
         setuptmu(0, "C * T", "= Ca");
 
-        glActiveTexture_(GL_TEXTURE1_ARB);
-        glClientActiveTexture_(GL_TEXTURE1_ARB);
+        gfx->activetexture(GL_TEXTURE1_ARB);
+        gfx->clientactivetexture(GL_TEXTURE1_ARB);
 
-        glEnable(GL_TEXTURE_2D);
+        gfx->enable(GL_TEXTURE_2D);
         setuptmu(1, "P * Ta x 4", "Pa * Ta x 4");
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glTexCoordPointer(2, GL_FLOAT, sizeof(expvert), &expverts->s);
+        gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+        gfx->texcoordpointer(2, GL_FLOAT, sizeof(expvert), &expverts->s);
 
-        glActiveTexture_(GL_TEXTURE0_ARB);
-        glClientActiveTexture_(GL_TEXTURE0_ARB);
+        gfx->activetexture(GL_TEXTURE0_ARB);
+        gfx->clientactivetexture(GL_TEXTURE0_ARB);
 
         if(!expmodtex[0]) expmodtex[0] = createexpmodtex(64, 0);
         if(!expmodtex[1]) expmodtex[1] = createexpmodtex(64, 0.25f);
@@ -135,52 +135,52 @@ void drawexplosion(bool inside, float r, float g, float b, float a)
 {
     if(mtexplosion && maxtmus>=2 && lastexpmodtex != expmodtex[inside ? 1 : 0])
     {
-        glActiveTexture_(GL_TEXTURE1_ARB);
+        gfx->activetexture(GL_TEXTURE1_ARB);
         lastexpmodtex = expmodtex[inside ? 1 :0];
-        glBindTexture(GL_TEXTURE_2D, lastexpmodtex);
-        glActiveTexture_(GL_TEXTURE0_ARB);
+        gfx->bindtexture(GL_TEXTURE_2D, lastexpmodtex);
+        gfx->activetexture(GL_TEXTURE0_ARB);
     }
     loopi(!reflecting && inside ? 2 : 1)
     {
-        glColor4f(r, g, b, i ? a/2 : a);
+        gfx->color4f(r, g, b, i ? a/2 : a);
         if(i)
         {
-            glScalef(1, 1, -1);
-            glDepthFunc(GL_GEQUAL);
+            gfx->scale(1, 1, -1);
+            gfx->depthfunc(GL_GEQUAL);
         }
         if(inside)
         {
             if(!reflecting)
             {
-                glCullFace(GL_BACK);
-                glDrawElements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
-                glCullFace(GL_FRONT);
+                gfx->cullface(GL_BACK);
+                gfx->drawelements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
+                gfx->cullface(GL_FRONT);
             }
-            glScalef(1, 1, -1);
+            gfx->scale(1, 1, -1);
         }
-        glDrawElements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
-        if(i) glDepthFunc(GL_LESS);
+        gfx->drawelements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
+        if(i) gfx->depthfunc(GL_LESS);
     }
 }
 
 void cleanupexplosion()
 {
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->disableclientstate(GL_VERTEX_ARRAY);
+    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 
     if(mtexplosion && maxtmus>=2)
     {
         resettmu(0);
 
-        glActiveTexture_(GL_TEXTURE1_ARB);
-        glClientActiveTexture_(GL_TEXTURE1_ARB);
+        gfx->activetexture(GL_TEXTURE1_ARB);
+        gfx->clientactivetexture(GL_TEXTURE1_ARB);
 
-        glDisable(GL_TEXTURE_2D);
+        gfx->disable(GL_TEXTURE_2D);
         resettmu(1);
-        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 
-        glActiveTexture_(GL_TEXTURE0_ARB);
-        glClientActiveTexture_(GL_TEXTURE0_ARB);
+        gfx->activetexture(GL_TEXTURE0_ARB);
+        gfx->clientactivetexture(GL_TEXTURE0_ARB);
     }
 }
 
@@ -266,7 +266,7 @@ void particleinit()
 
 void cleanupparticles()
 {
-    loopi(2) if(expmodtex[i]) { glDeleteTextures(1, &expmodtex[i]); expmodtex[i] = 0; }
+    loopi(2) if(expmodtex[i]) { gfx->deletetextures(1, &expmodtex[i]); expmodtex[i] = 0; }
 }
 
 void particlereset()
@@ -356,31 +356,31 @@ void render_particles(int time, int typemask)
         if(!rendered)
         {
             rendered = true;
-            glDepthMask(GL_FALSE);
-            glEnable(GL_BLEND);
-            glDisable(GL_FOG);
+            gfx->depthmask(GL_FALSE);
+            gfx->enable(GL_BLEND);
+            gfx->disable(GL_FOG);
         }
 
         parttype &pt = parttypes[i];
         float sz = pt.sz*particlesize/100.0f;
 
-        if(pt.tex>=0) glBindTexture(GL_TEXTURE_2D, parttex[pt.tex]->id);
-        else glDisable(GL_TEXTURE_2D);
+        if(pt.tex>=0) gfx->bindtexture(GL_TEXTURE_2D, parttex[pt.tex]->id);
+        else gfx->disable(GL_TEXTURE_2D);
         switch(pt.type)
         {
             case PT_HUDFLASH:
                 sethudgunperspective(true);
                 // fall through
             case PT_FLASH:
-                glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
-                glColor3f(pt.r, pt.g, pt.b);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR);
+                gfx->color3f(pt.r, pt.g, pt.b);
+                gfx->begin(GL_QUADS);
                 break;
 
             case PT_PART:
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-                glColor3f(pt.r, pt.g, pt.b);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE);
+                gfx->color3f(pt.r, pt.g, pt.b);
+                gfx->begin(GL_QUADS);
                 break;
 
             case PT_ORB:
@@ -390,35 +390,35 @@ void render_particles(int time, int typemask)
 
             case PT_FIREBALL:
                 setupexplosion();
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE);
                 break;
 
             case PT_SHOTLINE:
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glColor4f(pt.r, pt.g, pt.b, 0.5f);
-                glBegin(GL_LINES);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                gfx->color4f(pt.r, pt.g, pt.b, 0.5f);
+                gfx->begin(GL_LINES);
                 break;
 
             case PT_DECAL:
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                gfx->begin(GL_QUADS);
                 break;
 
             case PT_BULLETHOLE:
             case PT_CARROTRANGE:
-                glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA);
+                gfx->begin(GL_QUADS);
                 break;
 
             case PT_BLOOD:
-                glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
-                glColor3f(1-pt.r, 1-pt.g, 1-pt.b);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+                gfx->color3f(1-pt.r, 1-pt.g, 1-pt.b);
+                gfx->begin(GL_QUADS);
                 break;
 
             case PT_STAIN:
-                glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
-                glBegin(GL_QUADS);
+                gfx->blendfunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+                gfx->begin(GL_QUADS);
                 break;
         }
 
@@ -438,20 +438,20 @@ void render_particles(int time, int typemask)
                     };
                     loopk(4) corners[k].rotate(p->d.x, p->d.y, camdir).mul(sz*p->d.z).add(p->o);
 
-                    glTexCoord2i(0, 1); glVertex3fv(corners[0].v);
-                    glTexCoord2i(1, 1); glVertex3fv(corners[1].v);
-                    glTexCoord2i(1, 0); glVertex3fv(corners[2].v);
-                    glTexCoord2i(0, 0); glVertex3fv(corners[3].v);
+                    gfx->texcoord2i(0, 1); gfx->vertex3fv(corners[0].v);
+                    gfx->texcoord2i(1, 1); gfx->vertex3fv(corners[1].v);
+                    gfx->texcoord2i(1, 0); gfx->vertex3fv(corners[2].v);
+                    gfx->texcoord2i(0, 0); gfx->vertex3fv(corners[3].v);
 
                     xtraverts += 4;
                     break;
                 }
 
                 case PT_PART:
-                    glTexCoord2i(0, 1); glVertex3f(p->o.x+(-camright.x+camup.x)*sz, p->o.y+(-camright.y+camup.y)*sz, p->o.z+(-camright.z+camup.z)*sz);
-                    glTexCoord2i(1, 1); glVertex3f(p->o.x+( camright.x+camup.x)*sz, p->o.y+( camright.y+camup.y)*sz, p->o.z+( camright.z+camup.z)*sz);
-                    glTexCoord2i(1, 0); glVertex3f(p->o.x+( camright.x-camup.x)*sz, p->o.y+( camright.y-camup.y)*sz, p->o.z+( camright.z-camup.z)*sz);
-                    glTexCoord2i(0, 0); glVertex3f(p->o.x+(-camright.x-camup.x)*sz, p->o.y+(-camright.y-camup.y)*sz, p->o.z+(-camright.z-camup.z)*sz);
+                    gfx->texcoord2i(0, 1); gfx->vertex3f(p->o.x+(-camright.x+camup.x)*sz, p->o.y+(-camright.y+camup.y)*sz, p->o.z+(-camright.z+camup.z)*sz);
+                    gfx->texcoord2i(1, 1); gfx->vertex3f(p->o.x+( camright.x+camup.x)*sz, p->o.y+( camright.y+camup.y)*sz, p->o.z+( camright.z+camup.z)*sz);
+                    gfx->texcoord2i(1, 0); gfx->vertex3f(p->o.x+( camright.x-camup.x)*sz, p->o.y+( camright.y-camup.y)*sz, p->o.z+( camright.z-camup.z)*sz);
+                    gfx->texcoord2i(0, 0); gfx->vertex3f(p->o.x+(-camright.x-camup.x)*sz, p->o.y+(-camright.y-camup.y)*sz, p->o.z+(-camright.z-camup.z)*sz);
                     xtraverts += 4;
                     break;
 
@@ -474,41 +474,41 @@ void render_particles(int time, int typemask)
                 case PT_FIREBALL:
                 {
                     sz = 1.0f + (pt.sz-1.0f)*min(p->fade, lastmillis-p->millis)/p->fade;
-                    glPushMatrix();
-                    glTranslatef(p->o.x, p->o.y, p->o.z);
+                    gfx->pushmatrix();
+                    gfx->translate(p->o.x, p->o.y, p->o.z);
                     bool inside = p->o.dist(camera1->o) <= sz*1.25f; //1.25 is max wobble scale
                     vec oc(p->o);
                     oc.sub(camera1->o);
                     if(reflecting && !refracting) oc.z = p->o.z - (waterlevel - 0.3f);
-                    glRotatef(inside ? camera1->yaw - 180 : atan2(oc.y, oc.x)/RAD - 90, 0, 0, 1);
-                    glRotatef((inside ? camera1->pitch : asin(oc.z/oc.magnitude())/RAD) - 90, 1, 0, 0);
+                    gfx->rotate(inside ? camera1->yaw - 180 : atan2(oc.y, oc.x)/RAD - 90, 0, 0, 1);
+                    gfx->rotate((inside ? camera1->pitch : asin(oc.z/oc.magnitude())/RAD) - 90, 1, 0, 0);
 
-                    glRotatef(lastmillis/7.0f, 0, 0, 1);
-                    glScalef(-sz, sz, -sz);
+                    gfx->rotate(lastmillis/7.0f, 0, 0, 1);
+                    gfx->scale(-sz, sz, -sz);
                     drawexplosion(inside, pt.r, pt.g, pt.b, 1.0f-sz/pt.sz);
-                    glPopMatrix();
+                    gfx->popmatrix();
                     xtraverts += heminumverts;
                     break;
                 }
 
                 case PT_SHOTLINE:
-                    glVertex3f(p->o.x, p->o.y, p->o.z);
-                    glVertex3f(p->d.x, p->d.y, p->d.z);
+                    gfx->vertex3f(p->o.x, p->o.y, p->o.z);
+                    gfx->vertex3f(p->d.x, p->d.y, p->d.z);
                     xtraverts += 2;
                     break;
 
                 case PT_DECAL:
                 {
                     sqr *s = S((int)p->o.x, (int)p->o.y);
-                    glColor4f(s->r/127.5f, s->g/127.5f, s->b/127.5, max(0.0f, min((p->millis+p->fade - lastmillis)/1000.0f, 0.7f)));
+                    gfx->color4f(s->r/127.5f, s->g/127.5f, s->b/127.5, max(0.0f, min((p->millis+p->fade - lastmillis)/1000.0f, 0.7f)));
                     vec dx(0, 0, 0), dy(0, 0, 0);
                     loopk(3) if(p->d[k]) { dx[(k+1)%3] = -1; dy[(k+2)%3] = p->d[k]; break; }
                     int o = detrnd((size_t)p, 11);
                     static const int tc[4][2] = { {0, 1}, {1, 1}, {1, 0}, {0, 0} };
-                    glTexCoord2i(tc[o%4][0], tc[o%4][1]); glVertex3f(p->o.x+(-dx.x+dy.x)*pt.sz, p->o.y+(-dx.y+dy.y)*pt.sz, p->o.z+(-dx.z+dy.z)*pt.sz);
-                    glTexCoord2i(tc[(o+1)%4][0], tc[(o+1)%4][1]); glVertex3f(p->o.x+( dx.x+dy.x)*pt.sz, p->o.y+( dx.y+dy.y)*pt.sz, p->o.z+( dx.z+dy.z)*pt.sz);
-                    glTexCoord2i(tc[(o+2)%4][0], tc[(o+2)%4][1]); glVertex3f(p->o.x+( dx.x-dy.x)*pt.sz, p->o.y+( dx.y-dy.y)*pt.sz, p->o.z+( dx.z-dy.z)*pt.sz);
-                    glTexCoord2i(tc[(o+3)%4][0], tc[(o+3)%4][1]); glVertex3f(p->o.x+(-dx.x-dy.x)*pt.sz, p->o.y+(-dx.y-dy.y)*pt.sz, p->o.z+(-dx.z-dy.z)*pt.sz);
+                    gfx->texcoord2i(tc[o%4][0], tc[o%4][1]); gfx->vertex3f(p->o.x+(-dx.x+dy.x)*pt.sz, p->o.y+(-dx.y+dy.y)*pt.sz, p->o.z+(-dx.z+dy.z)*pt.sz);
+                    gfx->texcoord2i(tc[(o+1)%4][0], tc[(o+1)%4][1]); gfx->vertex3f(p->o.x+( dx.x+dy.x)*pt.sz, p->o.y+( dx.y+dy.y)*pt.sz, p->o.z+( dx.z+dy.z)*pt.sz);
+                    gfx->texcoord2i(tc[(o+2)%4][0], tc[(o+2)%4][1]); gfx->vertex3f(p->o.x+( dx.x-dy.x)*pt.sz, p->o.y+( dx.y-dy.y)*pt.sz, p->o.z+( dx.z-dy.z)*pt.sz);
+                    gfx->texcoord2i(tc[(o+3)%4][0], tc[(o+3)%4][1]); gfx->vertex3f(p->o.x+(-dx.x-dy.x)*pt.sz, p->o.y+(-dx.y-dy.y)*pt.sz, p->o.z+(-dx.z-dy.z)*pt.sz);
                     xtraverts += 4;
                     break;
                 }
@@ -518,7 +518,7 @@ void render_particles(int time, int typemask)
                 {
                     float usesz = pt.type == PT_CARROTRANGE ? p->size : pt.sz;
                     float blend = max(0.0f, min((p->millis+p->fade - lastmillis)/1000.0f, 1.0f));
-                    glColor4f(pt.r*blend, pt.g*blend, pt.b*blend, blend);
+                    gfx->color4f(pt.r*blend, pt.g*blend, pt.b*blend, blend);
                     vec dx(0, 0, 0), dy(0, 0, 0);
                     int tx = 0, ty = 1;
                     loopk(3) if(p->d[k])
@@ -527,10 +527,10 @@ void render_particles(int time, int typemask)
                         if(k<2) { tx = k^1; ty = 2; }
                         break;
                     }
-                    glTexCoord2f(0.5f+0.5f*(-dx[tx]+dy[tx]), 0.5f+0.5f*(-dx[ty]+dy[ty])); glVertex3f(p->o.x+(-dx.x+dy.x)*usesz, p->o.y+(-dx.y+dy.y)*usesz, p->o.z+(-dx.z+dy.z)*usesz);
-                    glTexCoord2f(0.5f+0.5f*( dx[tx]+dy[tx]), 0.5f+0.5f*( dx[ty]+dy[ty])); glVertex3f(p->o.x+( dx.x+dy.x)*usesz, p->o.y+( dx.y+dy.y)*usesz, p->o.z+( dx.z+dy.z)*usesz);
-                    glTexCoord2f(0.5f+0.5f*( dx[tx]-dy[tx]), 0.5f+0.5f*( dx[ty]-dy[ty])); glVertex3f(p->o.x+( dx.x-dy.x)*usesz, p->o.y+( dx.y-dy.y)*usesz, p->o.z+( dx.z-dy.z)*usesz);
-                    glTexCoord2f(0.5f+0.5f*(-dx[tx]-dy[tx]), 0.5f+0.5f*(-dx[ty]-dy[ty])); glVertex3f(p->o.x+(-dx.x-dy.x)*usesz, p->o.y+(-dx.y-dy.y)*usesz, p->o.z+(-dx.z-dy.z)*usesz);
+                    gfx->texcoord2f(0.5f+0.5f*(-dx[tx]+dy[tx]), 0.5f+0.5f*(-dx[ty]+dy[ty])); gfx->vertex3f(p->o.x+(-dx.x+dy.x)*usesz, p->o.y+(-dx.y+dy.y)*usesz, p->o.z+(-dx.z+dy.z)*usesz);
+                    gfx->texcoord2f(0.5f+0.5f*( dx[tx]+dy[tx]), 0.5f+0.5f*( dx[ty]+dy[ty])); gfx->vertex3f(p->o.x+( dx.x+dy.x)*usesz, p->o.y+( dx.y+dy.y)*usesz, p->o.z+( dx.z+dy.z)*usesz);
+                    gfx->texcoord2f(0.5f+0.5f*( dx[tx]-dy[tx]), 0.5f+0.5f*( dx[ty]-dy[ty])); gfx->vertex3f(p->o.x+( dx.x-dy.x)*usesz, p->o.y+( dx.y-dy.y)*usesz, p->o.z+( dx.z-dy.z)*usesz);
+                    gfx->texcoord2f(0.5f+0.5f*(-dx[tx]-dy[tx]), 0.5f+0.5f*(-dx[ty]-dy[ty])); gfx->vertex3f(p->o.x+(-dx.x-dy.x)*usesz, p->o.y+(-dx.y-dy.y)*usesz, p->o.z+(-dx.z-dy.z)*usesz);
                     xtraverts += 4;
                     break;
                 }
@@ -540,10 +540,10 @@ void render_particles(int time, int typemask)
                     int n = detrnd((size_t)p, 4), o = detrnd((size_t)p, 11);;
                     float tx = 0.5f*(n&1), ty = 0.5f*((n>>1)&1), tsz = 0.5f;
                     static const int tc[4][2] = { {0, 1}, {1, 1}, {1, 0}, {0, 0} };
-                    glTexCoord2f(tx+tsz*tc[o%4][0], ty+tsz*tc[o%4][1]); glVertex3f(p->o.x+(-camright.x+camup.x)*sz, p->o.y+(-camright.y+camup.y)*sz, p->o.z+(-camright.z+camup.z)*sz);
-                    glTexCoord2f(tx+tsz*tc[(o+1)%4][0], ty+tsz*tc[(o+1)%4][1]); glVertex3f(p->o.x+( camright.x+camup.x)*sz, p->o.y+( camright.y+camup.y)*sz, p->o.z+( camright.z+camup.z)*sz);
-                    glTexCoord2f(tx+tsz*tc[(o+2)%4][0], ty+tsz*tc[(o+2)%4][1]); glVertex3f(p->o.x+( camright.x-camup.x)*sz, p->o.y+( camright.y-camup.y)*sz, p->o.z+( camright.z-camup.z)*sz);
-                    glTexCoord2f(tx+tsz*tc[(o+3)%4][0], ty+tsz*tc[(o+3)%4][1]); glVertex3f(p->o.x+(-camright.x-camup.x)*sz, p->o.y+(-camright.y-camup.y)*sz, p->o.z+(-camright.z-camup.z)*sz);
+                    gfx->texcoord2f(tx+tsz*tc[o%4][0], ty+tsz*tc[o%4][1]); gfx->vertex3f(p->o.x+(-camright.x+camup.x)*sz, p->o.y+(-camright.y+camup.y)*sz, p->o.z+(-camright.z+camup.z)*sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+1)%4][0], ty+tsz*tc[(o+1)%4][1]); gfx->vertex3f(p->o.x+( camright.x+camup.x)*sz, p->o.y+( camright.y+camup.y)*sz, p->o.z+( camright.z+camup.z)*sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+2)%4][0], ty+tsz*tc[(o+2)%4][1]); gfx->vertex3f(p->o.x+( camright.x-camup.x)*sz, p->o.y+( camright.y-camup.y)*sz, p->o.z+( camright.z-camup.z)*sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+3)%4][0], ty+tsz*tc[(o+3)%4][1]); gfx->vertex3f(p->o.x+(-camright.x-camup.x)*sz, p->o.y+(-camright.y-camup.y)*sz, p->o.z+(-camright.z-camup.z)*sz);
                     xtraverts += 4;
                     break;
                 }
@@ -551,16 +551,16 @@ void render_particles(int time, int typemask)
                 case PT_STAIN:
                 {
                     float blend = max(0.0f, min((p->millis+p->fade - lastmillis)/1000.0f, 1.0f));
-                    glColor3f(blend*(1-pt.r), blend*(1-pt.g), blend*(1-pt.b));
+                    gfx->color3f(blend*(1-pt.r), blend*(1-pt.g), blend*(1-pt.b));
                     int n = detrnd((size_t)p, 4), o = detrnd((size_t)p, 11);
                     float tx = 0.5f*(n&1), ty = 0.5f*((n>>1)&1), tsz = 0.5f;
                     static const int tc[4][2] = { {0, 1}, {1, 1}, {1, 0}, {0, 0} };
                     vec dx(0, 0, 0), dy(0, 0, 0);
                     loopk(3) if(p->d[k]) { dx[(k+1)%3] = -1; dy[(k+2)%3] = p->d[k]; break; }
-                    glTexCoord2f(tx+tsz*tc[o%4][0], ty+tsz*tc[o%4][1]); glVertex3f(p->o.x+(-dx.x+dy.x)*pt.sz, p->o.y+(-dx.y+dy.y)*pt.sz, p->o.z+(-dx.z+dy.z)*pt.sz);
-                    glTexCoord2f(tx+tsz*tc[(o+1)%4][0], ty+tsz*tc[(o+1)%4][1]); glVertex3f(p->o.x+( dx.x+dy.x)*pt.sz, p->o.y+( dx.y+dy.y)*pt.sz, p->o.z+( dx.z+dy.z)*pt.sz);
-                    glTexCoord2f(tx+tsz*tc[(o+2)%4][0], ty+tsz*tc[(o+2)%4][1]); glVertex3f(p->o.x+( dx.x-dy.x)*pt.sz, p->o.y+( dx.y-dy.y)*pt.sz, p->o.z+( dx.z-dy.z)*pt.sz);
-                    glTexCoord2f(tx+tsz*tc[(o+3)%4][0], ty+tsz*tc[(o+3)%4][1]); glVertex3f(p->o.x+(-dx.x-dy.x)*pt.sz, p->o.y+(-dx.y-dy.y)*pt.sz, p->o.z+(-dx.z-dy.z)*pt.sz);
+                    gfx->texcoord2f(tx+tsz*tc[o%4][0], ty+tsz*tc[o%4][1]); gfx->vertex3f(p->o.x+(-dx.x+dy.x)*pt.sz, p->o.y+(-dx.y+dy.y)*pt.sz, p->o.z+(-dx.z+dy.z)*pt.sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+1)%4][0], ty+tsz*tc[(o+1)%4][1]); gfx->vertex3f(p->o.x+( dx.x+dy.x)*pt.sz, p->o.y+( dx.y+dy.y)*pt.sz, p->o.z+( dx.z+dy.z)*pt.sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+2)%4][0], ty+tsz*tc[(o+2)%4][1]); gfx->vertex3f(p->o.x+( dx.x-dy.x)*pt.sz, p->o.y+( dx.y-dy.y)*pt.sz, p->o.z+( dx.z-dy.z)*pt.sz);
+                    gfx->texcoord2f(tx+tsz*tc[(o+3)%4][0], ty+tsz*tc[(o+3)%4][1]); gfx->vertex3f(p->o.x+(-dx.x-dy.x)*pt.sz, p->o.y+(-dx.y-dy.y)*pt.sz, p->o.z+(-dx.z-dy.z)*pt.sz);
                     xtraverts += 4;
                     break;
                 }
@@ -606,7 +606,7 @@ void render_particles(int time, int typemask)
         switch(pt.type)
         {
             case PT_HUDFLASH:
-                glEnd();
+                gfx->end();
                 sethudgunperspective(false);
                 break;
 
@@ -618,7 +618,7 @@ void render_particles(int time, int typemask)
             case PT_BLOOD:
             case PT_STAIN:
             case PT_FLASH:
-                glEnd();
+                gfx->end();
                 break;
 
             case PT_ORB:
@@ -629,14 +629,14 @@ void render_particles(int time, int typemask)
                 cleanupexplosion();
                 break;
         }
-        if(pt.tex<0) glEnable(GL_TEXTURE_2D);
+        if(pt.tex<0) gfx->enable(GL_TEXTURE_2D);
     }
 
     if(rendered)
     {
-        glEnable(GL_FOG);
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
+        gfx->enable(GL_FOG);
+        gfx->disable(GL_BLEND);
+        gfx->depthmask(GL_TRUE);
     }
 }
 
