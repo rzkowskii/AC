@@ -927,6 +927,10 @@ static const char *rpnames[RP_NUM] = { "game update + input", "occlusion rays", 
     "HUD gun", "particles + water", "HUD + text", "swap / present" };
 static double rpacc[RP_NUM], rpcpu[RP_NUM], rplast = 0, rpcpulast = 0;
 static int rpframes = 0;
+// per-frame phase times, so the slowest frames can be compared with typical ones
+struct rpframe { float start, total, phase[RP_NUM]; };
+static vector<rpframe> rpframelog;
+static float rpcur[RP_NUM];
 
 // CPU time used by the calling thread: compared with wall time, it shows whether a phase is busy or waiting (on the GPU)
 static double threadcpums()
@@ -942,15 +946,54 @@ void rpmark(int phase)
 {
     if(!benchactive) return;
     double t = hrclockms(), c = threadcpums();
+    rpcur[phase] += t - rplast;
     rpacc[phase] += t - rplast;
     rpcpu[phase] += c - rpcpulast;
     rplast = t;
     rpcpulast = c;
 }
 
+static int rpframecmp(const rpframe *a, const rpframe *b) { return a->total < b->total ? 1 : (a->total > b->total ? -1 : 0); } // slowest first
+static int floatcmpasc(const float *a, const float *b) { return *a < *b ? -1 : (*a > *b ? 1 : 0); }
+
+// where the time goes in the slowest 1% of frames, compared with frames around the median
+static void rpspikereport()
+{
+    int n = rpframelog.length();
+    if(n < 200) return;
+    rpframelog.sort(rpframecmp);
+    int k = max(1, n / 100);
+    float slow[RP_NUM + 1], med[RP_NUM + 1];
+    loopi(RP_NUM + 1) slow[i] = med[i] = 0;
+    int m0 = n * 45 / 100, m1 = n * 55 / 100;
+    loopj(k) { const rpframe &f = rpframelog[j]; float sum = 0; loopi(RP_NUM) { slow[i] += f.phase[i]; sum += f.phase[i]; } slow[RP_NUM] += f.total - sum; }
+    for(int j = m0; j < m1; j++) { const rpframe &f = rpframelog[j]; float sum = 0; loopi(RP_NUM) { med[i] += f.phase[i]; sum += f.phase[i]; } med[RP_NUM] += f.total - sum; }
+    float slowtotal = 0, medtotal = 0;
+    loopj(k) slowtotal += rpframelog[j].total;
+    for(int j = m0; j < m1; j++) medtotal += rpframelog[j].total;
+    conoutf("benchmark: slowest 1%% of frames (%d, avg %.3f ms) vs median frames (avg %.3f ms), by phase:", k, slowtotal / k, medtotal / (m1 - m0));
+    loopi(RP_NUM + 1)
+    {
+        float s = slow[i] / k, md = med[i] / (m1 - m0);
+        if(s >= 0.01f || md >= 0.01f) conoutf("benchmark:   %-36s median %7.3f ms   slowest %7.3f ms", i < RP_NUM ? rpnames[i] : "outside the tracked phases", md, s);
+    }
+    // are the slow frames periodic? (interval between consecutive slow frames)
+    vector<float> starts;
+    loopj(k) starts.add(rpframelog[j].start);
+    starts.sort(floatcmpasc);
+    vector<float> gaps;
+    loopj(starts.length() - 1) gaps.add(starts[j+1] - starts[j]);
+    if(gaps.length() >= 3)
+    {
+        gaps.sort(floatcmpasc);
+        conoutf("benchmark:   slow frames recur every %.1f ms (median gap; quartiles %.1f / %.1f ms)", gaps[gaps.length()/2], gaps[gaps.length()/4], gaps[gaps.length()*3/4]);
+    }
+}
+
 static void rpreport()
 {
     if(rpframes <= 0) return;
+    rpspikereport();
     double total = 0, totalcpu = 0;
     loopi(RP_NUM) { total += rpacc[i]; totalcpu += rpcpu[i]; }
     conoutf("benchmark: main thread time per frame by phase (avg over %d frames: %.3f ms, of which %.0f%% busy on the CPU):",
@@ -967,13 +1010,23 @@ static float benchspinyaw = 0;
 static void benchframe(double now) // called once per frame with the frame's start time
 {
     if(!benchactive) return;
-    if(benchprev >= 0) { benchframes.add(float(now - benchprev)); rpframes++; }
+    if(benchprev >= 0)
+    {
+        benchframes.add(float(now - benchprev));
+        rpframes++;
+        rpframe &f = rpframelog.add();
+        f.start = float(benchprev - benchstart);
+        f.total = float(now - benchprev);
+        loopi(RP_NUM) f.phase[i] = rpcur[i];
+    }
     else
     {
         benchstart = now;
         loopi(RP_NUM) rpacc[i] = rpcpu[i] = 0;
         rpframes = 0;
+        rpframelog.setsize(0);
     }
+    loopi(RP_NUM) rpcur[i] = 0;
     benchprev = now;
     rplast = now;
     rpcpulast = threadcpums();
@@ -1028,15 +1081,24 @@ static void precisesleep(double ms)
 // showed up as uneven frame times (and a lower than requested fps).
 void limitfps()
 {
-    static double nextframe = -1;
+    static double nextframe = -1, oversleep = 0;
     if(!maxfps) { nextframe = -1; return; }
     const double period = 1000.0 / maxfps;
     double now = hrclockms();
     if(nextframe < 0 || now - nextframe > period) nextframe = now; // first frame, or more than one frame late: resync instead of rushing to catch up
     else
     {
-        double spin = fpslimitspin / 1000.0;
-        if(nextframe - now > spin) precisesleep(nextframe - now - spin);
+        // The OS wakes sleeping threads up late, by a varying amount (timer coalescing, scheduling), so the last part of the
+        // wait is busy-waited. Its length adapts to the lateness actually observed: a slowly decaying maximum, plus margin,
+        // never less than fpslimitspin and never more than 2 ms.
+        double spin = clamp(max(fpslimitspin / 1000.0, oversleep * 1.25 + 0.05), 0.0, 2.0);
+        double wakeup = nextframe - spin;
+        if(wakeup > now)
+        {
+            precisesleep(wakeup - now);
+            double late = hrclockms() - wakeup;
+            oversleep = max(late, oversleep * 0.995);
+        }
         while(hrclockms() < nextframe)
         {
 #ifndef WIN32
@@ -1531,6 +1593,8 @@ void sanitychecks()
 
 #ifdef __APPLE__
 #include <unistd.h>
+#include <pthread.h>
+#include <sys/qos.h>
 // When AssaultCube.app is started from Finder, the Dock or "open", the working directory is "/": switch to the game data
 // bundled in Contents/Resources. Returns true when running from an app bundle.
 static bool macbundlechdir()
@@ -1561,6 +1625,9 @@ int main(int argc, char **argv)
 {
 #ifdef __APPLE__
     const bool inmacbundle = macbundlechdir(); // before anything reads game data relative to the working directory
+    // the main thread runs the game: as "user interactive", macOS schedules it ahead of background work and doesn't
+    // coalesce its timers, which otherwise wake the frame limiter up late by a varying amount
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
     DEBUGCODE(sanitychecks());
     extern struct servercommandline scl;
