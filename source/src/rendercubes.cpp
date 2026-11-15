@@ -73,6 +73,32 @@ void renderstrips()
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 }
 
+// Depth-only drawing of the sky and world strips for the crosshair pick pass (see renderdepthpick() in rendergl.cpp).
+// Unlike renderstrips(), it keeps the batches, because the main pass draws them afterwards. Call setupstrips() first.
+#define DRAWSTRIPS(strips, type) \
+    if(strips.first.length()) \
+    { \
+        if(hasMDA && !ati_mda_bug) glMultiDrawArrays_(type, strips.first.getbuf(), strips.count.getbuf(), strips.first.length()); \
+        else loopv(strips.first) glDrawArrays(type, strips.first[i], strips.count[i]); \
+    }
+
+void renderstripsdepth()
+{
+    DRAWSTRIPS(skystrips.tris, GL_TRIANGLES);
+    DRAWSTRIPS(skystrips.tristrips, GL_TRIANGLE_STRIP);
+    DRAWSTRIPS(skystrips.quads, GL_QUADS);
+    loopj(renderedtexs)
+    {
+        stripbatch &sb = stripbatches[j];
+        DRAWSTRIPS(sb.tris, GL_TRIANGLES);
+        DRAWSTRIPS(sb.tristrips, GL_TRIANGLE_STRIP);
+        DRAWSTRIPS(sb.quads, GL_QUADS);
+    }
+    glDisableClientState(GL_VERTEX_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+}
+
 void addstrip(int type, int tex, int start, int n)
 {
     stripbatch *sb = NULL;

@@ -922,7 +922,8 @@ static void benchreport()
 
 // renderer profile: CPU time per frame phase while a benchmark runs (see rpmark() in protos.h)
 static const char *rpnames[RP_NUM] = { "game update + input", "occlusion rays", "audio, network, other", "frame setup + dynamic lights",
-    "water reflection", "world geometry (CPU)", "world draw calls", "map models + shadows", "depth readback", "players + items",
+    "water reflection", "world geometry (CPU)", "crosshair pick pass", "world draw calls", "map models + shadows", "depth readback (issue)",
+    "depth readback (fetch, next frame)", "players + items",
     "HUD gun", "particles + water", "HUD + text", "swap / present" };
 static double rpacc[RP_NUM], rpcpu[RP_NUM], rplast = 0, rpcpulast = 0;
 static int rpframes = 0;
@@ -1887,6 +1888,9 @@ int main(int argc, char **argv)
         // game time only has the real clock's sub-millisecond phase when it advances 1:1 with real time
         extern float lastmillisfrac;
         lastmillisfrac = curtime == elapsed && !(multiplayer(NULL) ? ispaused : paused) ? millisfrac : 0;
+
+        resolvedepth(); // worldpos from the previous frame's depth read, before anything (input, shooting) can use it
+        rpmark(RP_DEPTHRESOLVE);
 
         checkinput();
 

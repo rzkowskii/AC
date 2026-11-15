@@ -25,6 +25,28 @@ PFNGLACTIVESTENCILFACEEXTPROC glActiveStencilFace_ = NULL;
 PFNGLSTENCILOPSEPARATEATIPROC   glStencilOpSeparate_ = NULL;
 PFNGLSTENCILFUNCSEPARATEATIPROC glStencilFuncSeparate_ = NULL;
 
+// buffer objects (OpenGL 1.5 / GL_ARB_vertex_buffer_object) and pixel buffer objects (OpenGL 2.1 / GL_ARB_pixel_buffer_object)
+bool hasVBO = false, hasPBO = false;
+PFNGLGENBUFFERSPROC    glGenBuffers_    = NULL;
+PFNGLDELETEBUFFERSPROC glDeleteBuffers_ = NULL;
+PFNGLBINDBUFFERPROC    glBindBuffer_    = NULL;
+PFNGLBUFFERDATAPROC    glBufferData_    = NULL;
+PFNGLMAPBUFFERPROC     glMapBuffer_     = NULL;
+PFNGLUNMAPBUFFERPROC   glUnmapBuffer_   = NULL;
+
+// framebuffer objects (GL_EXT_framebuffer_object, available in macOS's legacy OpenGL 2.1 context and in Mesa)
+bool hasFBO = false;
+PFNGLGENFRAMEBUFFERSEXTPROC         glGenFramebuffers_         = NULL;
+PFNGLDELETEFRAMEBUFFERSEXTPROC      glDeleteFramebuffers_      = NULL;
+PFNGLBINDFRAMEBUFFEREXTPROC         glBindFramebuffer_         = NULL;
+PFNGLGENRENDERBUFFERSEXTPROC        glGenRenderbuffers_        = NULL;
+PFNGLDELETERENDERBUFFERSEXTPROC     glDeleteRenderbuffers_     = NULL;
+PFNGLBINDRENDERBUFFEREXTPROC        glBindRenderbuffer_        = NULL;
+PFNGLRENDERBUFFERSTORAGEEXTPROC     glRenderbufferStorage_     = NULL;
+PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC glFramebufferRenderbuffer_ = NULL;
+PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC  glCheckFramebufferStatus_  = NULL;
+bool hasDBF = false; // GL_ARB_depth_buffer_float
+
 void *getprocaddress(const char *name)
 {
     return SDL_GL_GetProcAddress(name);
@@ -106,6 +128,44 @@ void gl_checkextensions()
 
     if(hasext(exts, "GL_EXT_stencil_wrap")) hasSTW = true;
 
+    // buffer objects: core since OpenGL 1.5 (try the core names first, then the ARB extension's)
+    int glmajor = 0, glminor = 0;
+    if(sscanf(version, "%d.%d", &glmajor, &glminor) != 2) glmajor = glminor = 0;
+    bool core15 = glmajor > 1 || (glmajor == 1 && glminor >= 5), core21 = glmajor > 2 || (glmajor == 2 && glminor >= 1);
+    if(core15 || hasext(exts, "GL_ARB_vertex_buffer_object"))
+    {
+        #define GETBUFPROC(var, type, name) var = (type)getprocaddress(name); if(!var) var = (type)getprocaddress(name "ARB");
+        GETBUFPROC(glGenBuffers_,    PFNGLGENBUFFERSPROC,    "glGenBuffers");
+        GETBUFPROC(glDeleteBuffers_, PFNGLDELETEBUFFERSPROC, "glDeleteBuffers");
+        GETBUFPROC(glBindBuffer_,    PFNGLBINDBUFFERPROC,    "glBindBuffer");
+        GETBUFPROC(glBufferData_,    PFNGLBUFFERDATAPROC,    "glBufferData");
+        GETBUFPROC(glMapBuffer_,     PFNGLMAPBUFFERPROC,     "glMapBuffer");
+        GETBUFPROC(glUnmapBuffer_,   PFNGLUNMAPBUFFERPROC,   "glUnmapBuffer");
+        #undef GETBUFPROC
+        hasVBO = glGenBuffers_ && glDeleteBuffers_ && glBindBuffer_ && glBufferData_ && glMapBuffer_ && glUnmapBuffer_;
+        hasPBO = hasVBO && (core21 || hasext(exts, "GL_ARB_pixel_buffer_object") || hasext(exts, "GL_EXT_pixel_buffer_object"));
+    }
+    if(hasext(exts, "GL_EXT_framebuffer_object"))
+    {
+        glGenFramebuffers_         = (PFNGLGENFRAMEBUFFERSEXTPROC)        getprocaddress("glGenFramebuffersEXT");
+        glDeleteFramebuffers_      = (PFNGLDELETEFRAMEBUFFERSEXTPROC)     getprocaddress("glDeleteFramebuffersEXT");
+        glBindFramebuffer_         = (PFNGLBINDFRAMEBUFFEREXTPROC)        getprocaddress("glBindFramebufferEXT");
+        glGenRenderbuffers_        = (PFNGLGENRENDERBUFFERSEXTPROC)       getprocaddress("glGenRenderbuffersEXT");
+        glDeleteRenderbuffers_     = (PFNGLDELETERENDERBUFFERSEXTPROC)    getprocaddress("glDeleteRenderbuffersEXT");
+        glBindRenderbuffer_        = (PFNGLBINDRENDERBUFFEREXTPROC)       getprocaddress("glBindRenderbufferEXT");
+        glRenderbufferStorage_     = (PFNGLRENDERBUFFERSTORAGEEXTPROC)    getprocaddress("glRenderbufferStorageEXT");
+        glFramebufferRenderbuffer_ = (PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC)getprocaddress("glFramebufferRenderbufferEXT");
+        glCheckFramebufferStatus_  = (PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC) getprocaddress("glCheckFramebufferStatusEXT");
+        hasFBO = glGenFramebuffers_ && glDeleteFramebuffers_ && glBindFramebuffer_ && glGenRenderbuffers_ && glDeleteRenderbuffers_ &&
+                 glBindRenderbuffer_ && glRenderbufferStorage_ && glFramebufferRenderbuffer_ && glCheckFramebufferStatus_;
+    }
+    hasDBF = hasext(exts, "GL_ARB_depth_buffer_float");
+
+    // Apple's OpenGL-on-Metal performs pixel buffer reads synchronously anyway, so the asynchronous depth read only adds
+    // overhead there (measured 1-5% slower on an M4 Max); see readdepth()
+    extern int asyncdepth;
+    if(strstr(version, "Metal")) asyncdepth = 0;
+
     if(hasext(exts, "GL_EXT_texture_filter_anisotropic"))
     {
        GLint val;
@@ -131,8 +191,11 @@ void gl_checkextensions()
 #endif
 }
 
+static int scenedepthbits = 24; // precision of the main depth buffer, mirrored by the crosshair pick buffer
+
 void gl_init(int w, int h, int depth, int fsaa)
 {
+    if(depth > 0) scenedepthbits = depth;
     //#define fogvalues 0.5f, 0.6f, 0.7f, 1.0f
 
     glViewport(0, 0, w, h);
@@ -902,6 +965,8 @@ void drawminimap(int w, int h)
     glClearDepth(1.0);
 }
 
+static void cleanupdepthread();
+
 void cleanupgl()
 {
     if(reflecttex) glDeleteTextures(1, &reflecttex);
@@ -909,6 +974,7 @@ void cleanupgl()
     if(minimaptex) glDeleteTextures(1, &minimaptex);
     reflecttex = refracttex = minimaptex = 0;
     minimapdirty = true;
+    cleanupdepthread();
 }
 
 void drawzone(int *x1, int *x2, int *y1, int *y2, int *color)
@@ -1014,14 +1080,247 @@ float depthcorrect(float d)
 // also hits map entities which is unwanted.
 // could be replaced by a more acurate version of monster.cpp los() if needed
 
-void readdepth(int w, int h, vec &pos)
+static void depthtoworldpos(float depth, const glmatrixf &invmvp, const vec &from, vec &pos)
 {
-    glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &cursordepth);
+    cursordepth = depth;
     vec screen(0, 0, depthcorrect(cursordepth)*2 - 1);
     vec4 world;
-    invmvpmatrix.transform(screen, world);
+    invmvp.transform(screen, world);
     pos = vec(world.x, world.y, world.z).div(world.w);
-    intersectgeometry(camera1->o, pos);
+    intersectgeometry(from, pos);
+}
+
+// Reading the depth back synchronously makes the CPU wait, in the middle of every frame, until the GPU has drawn the
+// world - CPU and GPU can't work in parallel. But shooting only uses worldpos in the *next* frame (shoot() runs in
+// updateworld(), before that frame's rendering). So by default the depth is copied into a pixel buffer object without
+// waiting, and turned into worldpos at the start of the next frame by resolvedepth(), with the matrices and camera
+// position of the frame it was read in: shoot() gets exactly the same target as with the synchronous read.
+// The only difference is for the few things drawn later in the same frame (the HUD gun's sway towards the target and
+// the name of the player in the crosshair), which see the value from one frame earlier. In edit mode, where the edit
+// cursor needs the current frame, the read stays synchronous. "asyncdepth 0" restores the synchronous read.
+VAR(asyncdepth, 0, 1, 1);
+static GLuint depthpbo = 0;
+static bool depthpending = false, depthinpbo = false;
+static glmatrixf depthinvmvp;
+static vec depthfrom;
+
+// The crosshair pick pass: before the main pass, the sky cubes, world and map models are drawn again, depth only, into a
+// separate 1x1 framebuffer, through a projection zoomed onto the crosshair pixel. Its depth is read at the start of the
+// next frame - exactly when shoot() needs it - instead of in the middle of the main pass. On tile-based GPUs (Apple
+// Silicon) reading back in the middle of the main pass splits it in two, which costs far more GPU time than drawing the
+// geometry a second time, and with a frame rate cap the GPU has finished the frame by the time the depth is read.
+// "depthpick 0" restores reading the main pass's depth in the middle of the frame.
+VAR(depthpick, 0, 1, 1);
+static GLuint pickfbo = 0, pickrb[2] = { 0, 0 };
+static bool pickdrawn = false; // the pick pass ran this frame: readdepth() has nothing to do
+
+// "depthcheck 1" (debugging): also reads the main pass's depth in the middle of the frame (the old way) and compares the
+// target that shoot() gets with the one the old code would have given it
+VAR(depthcheck, 0, 0, 1);
+static vec depthcheckpos;
+static int depthchecked = 0, depthmismatches = 0, depthfar = 0;
+static float depthmaxdiff = 0;
+
+void resolvedepth() // called at the start of a frame, before input and game updates
+{
+    if(!depthpending) return;
+    depthpending = false;
+    float d = 1;
+    if(depthinpbo)
+    {
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
+        const float *depth = (const float *)glMapBuffer_(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY);
+        if(depth) { d = *depth; glUnmapBuffer_(GL_PIXEL_PACK_BUFFER_ARB); }
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
+        if(!depth) return;
+    }
+    else if(pickfbo)
+    {
+        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
+        glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
+        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
+    }
+    else return;
+    depthtoworldpos(d, depthinvmvp, depthfrom, worldpos);
+    if(depthcheck)
+    {
+        float diff = worldpos.dist(depthcheckpos);
+        depthchecked++;
+        if(diff != 0) { depthmismatches++; depthmaxdiff = max(depthmaxdiff, diff); }
+        if(diff > 0.01f) depthfar++;
+        if(depthchecked % 500 == 0)
+            conoutf("depthcheck: %d frames compared, %d differ from the old read (%d by more than 0.01 units, max distance %f)",
+                    depthchecked, depthmismatches, depthfar, depthmaxdiff);
+    }
+}
+
+static void cleanuppick()
+{
+    if(pickfbo) glDeleteFramebuffers_(1, &pickfbo);
+    if(pickrb[0]) glDeleteRenderbuffers_(2, pickrb);
+    pickfbo = pickrb[0] = pickrb[1] = 0;
+    pickdrawn = false;
+}
+
+static void cleanupdepthread()
+{
+    if(depthpbo) glDeleteBuffers_(1, &depthpbo);
+    depthpbo = 0;
+    depthpending = depthinpbo = false;
+    cleanuppick();
+}
+
+#ifndef GL_DEPTH_COMPONENT32F
+#define GL_DEPTH_COMPONENT32F 0x8CAC
+#endif
+
+static bool setuppick()
+{
+    if(pickfbo) return true;
+    // same depth precision as the main depth buffer; try the closest formats first
+    GLenum formats[3];
+    int numformats = 0;
+    if(scenedepthbits >= 32)
+    {
+        if(hasDBF) formats[numformats++] = GL_DEPTH_COMPONENT32F;
+        formats[numformats++] = GL_DEPTH_COMPONENT32;
+    }
+    formats[numformats++] = GL_DEPTH_COMPONENT24;
+    GLenum status = 0;
+    loopi(numformats)
+    {
+        glGenRenderbuffers_(2, pickrb);
+        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, pickrb[0]);
+        glRenderbufferStorage_(GL_RENDERBUFFER_EXT, GL_RGBA8, 1, 1);
+        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, pickrb[1]);
+        glRenderbufferStorage_(GL_RENDERBUFFER_EXT, formats[i], 1, 1);
+        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, 0);
+        glGenFramebuffers_(1, &pickfbo);
+        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
+        glFramebufferRenderbuffer_(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, pickrb[0]);
+        glFramebufferRenderbuffer_(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, pickrb[1]);
+        status = glCheckFramebufferStatus_(GL_FRAMEBUFFER_EXT);
+        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
+        if(status == GL_FRAMEBUFFER_COMPLETE_EXT) return true;
+        cleanuppick();
+    }
+    conoutf("crosshair pick buffer not supported (0x%X): reading the depth in the middle of the frame instead", status);
+    depthpick = 0;
+    return false;
+}
+
+static void renderdepthpick(int w, int h)
+{
+    pickdrawn = false;
+    if(!setuppick()) return;
+    glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
+    glViewport(0, 0, 1, 1);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    // projection zoomed onto the crosshair pixel (w/2, h/2), the pixel the main pass's depth used to be read from:
+    // that pixel's footprint is mapped onto the 1x1 viewport, so its centre is sampled at the same point of the view
+    int px = w/2, py = h/2;
+    glmatrixf zoom;
+    zoom.identity();
+    zoom.v[0] = w;
+    zoom.v[5] = h;
+    zoom.v[12] = w - 2*px - 1;
+    zoom.v[13] = h - 2*py - 1;
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadMatrixf(zoom.v);
+    glMultMatrixf(projmatrix.v);
+    glMatrixMode(GL_MODELVIEW);
+    transplayer();
+
+    // what the main pass has drawn when the old code read its depth: sky cubes and world (the sky box doesn't write depth)...
+    glDisable(GL_TEXTURE_2D);
+    setupstrips();
+    renderstripsdepth();
+    glEnable(GL_TEXTURE_2D);
+    // ...and map models, with their textures for alpha-tested skins (blob shadows don't write depth: skipped). Only the
+    // models whose bounding sphere the ray through the crosshair pixel's centre passes through can affect its depth.
+    vec4 nearw, farw;
+    invmvpmatrix.transform(vec(2*(px + 0.5f)/w - 1, 2*(py + 0.5f)/h - 1, -1), nearw);
+    invmvpmatrix.transform(vec(2*(px + 0.5f)/w - 1, 2*(py + 0.5f)/h - 1, 1), farw);
+    vec raynear = vec(nearw.x, nearw.y, nearw.z).div(nearw.w), raydir = vec(farw.x, farw.y, farw.z).div(farw.w).sub(raynear).normalize();
+    extern int dynshadow;
+    extern void rendermapmodelsalongray(const vec &from, const vec &dir);
+    int keepdynshadow = dynshadow;
+    dynshadow = 0;
+    startmodelbatches();
+    rendermapmodelsalongray(raynear, raydir);
+    endmodelbatches();
+    dynshadow = keepdynshadow;
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+    depthinpbo = asyncdepth && hasPBO;
+    if(depthinpbo) // on drivers that read asynchronously, start copying the result right away
+    {
+        if(!depthpbo)
+        {
+            glGenBuffers_(1, &depthpbo);
+            glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
+            glBufferData_(GL_PIXEL_PACK_BUFFER_ARB, sizeof(float), NULL, GL_STREAM_READ);
+        }
+        else glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
+        glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
+    }
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
+    glViewport(0, 0, w, h);
+
+    depthinvmvp = invmvpmatrix;
+    depthfrom = camera1->o;
+    depthpending = pickdrawn = true;
+}
+
+void readdepth(int w, int h, vec &pos)
+{
+    if(pickdrawn && &pos == &worldpos) // the target was drawn by the pick pass: nothing to read in the middle of the frame
+    {
+        pickdrawn = false;
+        if(depthcheck)
+        {
+            float syncdepth, keepcursordepth = cursordepth;
+            glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &syncdepth);
+            depthtoworldpos(syncdepth, invmvpmatrix, camera1->o, depthcheckpos);
+            cursordepth = keepcursordepth;
+        }
+        return;
+    }
+    if(asyncdepth && hasPBO && !editmode && &pos == &worldpos)
+    {
+        if(!depthpbo)
+        {
+            glGenBuffers_(1, &depthpbo);
+            glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
+            glBufferData_(GL_PIXEL_PACK_BUFFER_ARB, sizeof(float), NULL, GL_STREAM_READ);
+        }
+        else glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
+        glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, NULL); // into the buffer object: returns without waiting
+        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
+        depthinvmvp = invmvpmatrix;
+        depthfrom = camera1->o;
+        depthpending = depthinpbo = true;
+        if(depthcheck)
+        {
+            float syncdepth, keepcursordepth = cursordepth;
+            glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &syncdepth);
+            depthtoworldpos(syncdepth, invmvpmatrix, camera1->o, depthcheckpos);
+            cursordepth = keepcursordepth;
+        }
+        return; // pos keeps the previous frame's value until resolvedepth()
+    }
+    depthpending = false; // a synchronous read supersedes a pending one
+    float depth;
+    glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    depthtoworldpos(depth, invmvpmatrix, camera1->o, pos);
 }
 
 VARP(ignoreoverride_nowaterreflect, 0, 0, 1);
@@ -1089,9 +1388,6 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     }
     rpmark(RP_REFLECTION);
 
-    if(effective_stencilshadow && hasstencil && stencilbits >= 8) glClearStencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
-    glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
-
     glEnable(GL_TEXTURE_2D);
 
     resetcubes();
@@ -1099,6 +1395,13 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     render_world(camera1->o.x, camera1->o.y, camera1->o.z, changelod,
             (int)camera1->yaw, (int)camera1->pitch, dynfov(), fovy, w, h);
     rpmark(RP_WORLDGEN);
+
+    // crosshair target: drawn in its own small pass *before* the main pass starts (see renderdepthpick())
+    if(depthpick && hasFBO && !editmode) renderdepthpick(w, h);
+    rpmark(RP_DEPTHPICK);
+
+    if(effective_stencilshadow && hasstencil && stencilbits >= 8) glClearStencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
+    glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
 
     setupstrips();
 

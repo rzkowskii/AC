@@ -407,10 +407,11 @@ extern void gl_drawframe(int w, int h, float changelod, float curfps, int elapse
 
 // renderer profile (main.cpp): while a "benchmark" runs, the CPU time of each frame phase is accumulated;
 // rpmark(phase) charges the time since the previous mark to that phase
-enum { RP_UPDATE = 0, RP_OCCLUSION, RP_OTHER, RP_SETUP, RP_REFLECTION, RP_WORLDGEN, RP_WORLDDRAW, RP_MAPMODELS, RP_DEPTHREAD,
-       RP_MODELS, RP_HUDGUN, RP_EFFECTS, RP_HUD, RP_SWAP, RP_NUM };
+enum { RP_UPDATE = 0, RP_OCCLUSION, RP_OTHER, RP_SETUP, RP_REFLECTION, RP_WORLDGEN, RP_DEPTHPICK, RP_WORLDDRAW, RP_MAPMODELS, RP_DEPTHREAD,
+       RP_DEPTHRESOLVE, RP_MODELS, RP_HUDGUN, RP_EFFECTS, RP_HUD, RP_SWAP, RP_NUM };
 extern void rpmark(int phase);
 extern double hrclockms();
+extern void resolvedepth(); // rendergl.cpp: turn the previous frame's asynchronous depth read into worldpos
 extern void clearminimap();
 extern void resetzones();
 extern void rendercursor(int x, int y, int w);
@@ -530,6 +531,7 @@ extern void resetcubes();
 extern void setupstrips();
 extern void renderstripssky();
 extern void renderstrips();
+extern void renderstripsdepth(); // depth-only, keeps the batches (crosshair pick pass)
 extern void rendershadow(int x, int y, int xs, int ys, const vec &texgenS, const vec &texgenT);
 
 // water

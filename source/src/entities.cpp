@@ -181,6 +181,29 @@ void rendermapmodels()
     }
 }
 
+// The map models whose bounding sphere the ray from 'from' along 'dir' (normalized) passes through: only these can
+// change the depth of the crosshair pixel, so the crosshair pick pass (rendergl.cpp) doesn't need to draw the others.
+// The model radius is measured after the model's own scale and offset are applied (see md2.h/md3.h), so a sphere of
+// sqrt(radius^2 + zradius^2) * instance scale around the entity encloses every vertex; a margin is added on top.
+void rendermapmodelsalongray(const vec &from, const vec &dir)
+{
+    loopv(ents)
+    {
+        entity &e = ents[i];
+        if(e.type!=MAPMODEL) continue;
+        mapmodelinfo *mmi = getmminfo(e.attr2);
+        if(!mmi) continue;
+        model *m = loadmodel(mmi->name);
+        if(!m) continue;
+        vec o(e.x, e.y, S(e.x, e.y)->floor + mmi->zoff + float(e.attr3) / ENTSCALE5);
+        float r = sqrtf(m->radius*m->radius + m->zradius*m->zradius) * max(mmi->scale, 1.0f) * 1.25f + 1.0f;
+        vec to = vec(o).sub(from);
+        float t = to.dot(dir);
+        if(t < -r || to.squaredlen() - t*t > r*r) continue;
+        rendermodel(mmi->name, ANIM_MAPMODEL|ANIM_LOOP, e.attr4, 0, o, e.attr6, float(e.attr1) / ENTSCALE10, float(e.attr5) / ENTSCALE10, 10.0f, 0, NULL, NULL, mmi->scale);
+    }
+}
+
 VARP(entarrowstyle,0,1,1);
 
 void renderentarrow(const entity &e, const vec &dir, float radius, GLfloat color[4])
