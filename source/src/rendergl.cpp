@@ -1050,6 +1050,8 @@ void cleanupgl()
     cleanupreflectfbos();
     minimapdirty = true;
     cleanupdepthread();
+    extern void cleanupworldvbo();
+    cleanupworldvbo();
     extern void cleanuppostfx();
     cleanuppostfx();
 }

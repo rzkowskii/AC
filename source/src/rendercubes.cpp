@@ -3,8 +3,22 @@
 #include "cube.h"
 
 vector<vertex> verts;
+static int vertsgen = 0; // changes whenever the world vertices are regenerated (resetcubes())
 
 void finishstrips();
+
+// "worldvbo 1": the frame's world vertices are uploaded once into a vertex buffer object and every pass (crosshair pick,
+// sky, world, reflections) draws from it; with client arrays the driver copies the vertices again for every draw.
+VARP(worldvbo, 0, 1, 1);
+static GLuint worldvbobuf = 0;
+static int worldvbogen = -1, worldvbolen = -1;
+
+void cleanupworldvbo()
+{
+    if(worldvbobuf) glDeleteBuffers_(1, &worldvbobuf);
+    worldvbobuf = 0;
+    worldvbogen = worldvbolen = -1;
+}
 
 void setupstrips()
 {
@@ -14,10 +28,24 @@ void setupstrips()
     glEnableClientState(GL_COLOR_ARRAY);
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
-    vertex *buf = verts.getbuf();
-    glVertexPointer(3, GL_FLOAT, sizeof(vertex), &buf->x);
-    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(vertex), &buf->r);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(vertex), &buf->u);
+    uintptr_t base = (uintptr_t)verts.getbuf(); // client memory, or offsets into the buffer object
+    bool usevbo = worldvbo && hasVBO && verts.length();
+    if(usevbo)
+    {
+        if(!worldvbobuf) glGenBuffers_(1, &worldvbobuf);
+        glBindBuffer_(GL_ARRAY_BUFFER_ARB, worldvbobuf);
+        if(worldvbogen != vertsgen || worldvbolen != verts.length())
+        {
+            glBufferData_(GL_ARRAY_BUFFER_ARB, verts.length()*sizeof(vertex), verts.getbuf(), GL_STREAM_DRAW_ARB);
+            worldvbogen = vertsgen;
+            worldvbolen = verts.length();
+        }
+        base = 0;
+    }
+    glVertexPointer(3, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, x)));
+    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(vertex), (const void *)(base + offsetof(vertex, r)));
+    glTexCoordPointer(2, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, u)));
+    if(usevbo) glBindBuffer_(GL_ARRAY_BUFFER_ARB, 0); // the pointers keep referring to the buffer
 }
 
 struct strips { vector<GLint> first; vector<GLsizei> count; };
@@ -438,6 +466,7 @@ void render_square(int wtex, float floor1, float floor2, float ceil1, float ceil
 void resetcubes()
 {
     verts.setsize(0);
+    vertsgen++;
 
     striptype = 0;
     nquads = 0;

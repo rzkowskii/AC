@@ -108,6 +108,13 @@ extern PFNGLMULTIDRAWELEMENTSEXTPROC glMultiDrawElements_;
 // GL_EXT_draw_range_elements
 extern PFNGLDRAWRANGEELEMENTSEXTPROC glDrawRangeElements_;
 
+// buffer objects (OpenGL 1.5 / GL_ARB_vertex_buffer_object)
+extern bool hasVBO;
+extern PFNGLGENBUFFERSPROC    glGenBuffers_;
+extern PFNGLDELETEBUFFERSPROC glDeleteBuffers_;
+extern PFNGLBINDBUFFERPROC    glBindBuffer_;
+extern PFNGLBUFFERDATAPROC    glBufferData_;
+
 // GL_EXT_stencil_two_side
 extern PFNGLACTIVESTENCILFACEEXTPROC glActiveStencilFace_;
 
