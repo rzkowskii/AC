@@ -867,6 +867,7 @@ void resetgl()
 COMMAND(resetgl, "");
 
 VARFP(maxfps, 0, 200, 1000, if(maxfps && maxfps < 25) maxfps = 25);
+VARP(gpusync, 0, 0, 1);
 VARP(fpslimitspin, 0, 250, 2000); // microseconds at the end of each capped frame that are busy-waited instead of slept, to absorb OS timer jitter
 
 // high-resolution clock: milliseconds with sub-millisecond precision, on the same epoch as SDL_GetTicks()
@@ -1678,7 +1679,7 @@ int main(int argc, char **argv)
     for(int i = 1; i<argc; i++)
     {
         clientlogf("parsing commandline argument %d: \"%s\"", i, argv[i]);
-        // server: ufimNFTLAckyxpDWrXBKIoOnPMVC
+        // server: ufimNFTLAckyxpDWrXBKIoOnPMVCQ
         if(!scl.checkarg(argv[i]))
         {
             char *a = &argv[i][2];
@@ -2015,6 +2016,10 @@ int main(int argc, char **argv)
         {
             gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
             if(frames>4) SDL_GL_SwapWindow(screen);
+            // "gpusync 1": wait for the GPU to finish the frame, so the driver can't queue frames ahead. Costs throughput
+            // (CPU and GPU no longer overlap) but keeps input-to-display latency at one frame.
+            extern int gpusync;
+            if(gpusync) glFinish();
             rpmark(RP_SWAP);
         }
 

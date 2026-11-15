@@ -1,6 +1,11 @@
 // misc useful functions used by the server
 
 #include "cube.h"
+#ifndef WIN32
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#endif
 
 #ifdef _DEBUG
 bool protocoldbg = false, debugmute = false;
@@ -18,6 +23,25 @@ static inline void putint_(T &p, int n)
     else if(n<0x8000 && n>=-0x8000) { p.put(0x80); p.put(n); p.put(n>>8); }
     else { p.put(0x81); p.put(n); p.put(n>>8); p.put(n>>16); p.put(n>>24); }
 }
+// Marks the game's UDP traffic as "real-time interactive" (RFC 4594 class CS4, which covers interactive gaming), so
+// routers and Wi-Fi (WMM) that honour DiffServ can queue it ahead of bulk traffic. On macOS the network service type
+// sets both the DSCP marking and the Wi-Fi access category. Small, low-rate packets fit this class; the bulk
+// transfers (map downloads) are short and rare. Does nothing on Windows, which ignores IP_TOS set by applications
+// (marking there needs the qWAVE API or a system QoS policy).
+void setlowlatencysocket(ENetSocket sock)
+{
+#ifndef WIN32
+    if(sock == ENET_SOCKET_NULL) return;
+    #ifdef __APPLE__
+    int svc = NET_SERVICE_TYPE_RV;
+    setsockopt(sock, SOL_SOCKET, SO_NET_SERVICE_TYPE, &svc, sizeof(svc));
+    #else
+    int tos = 0x80; // DSCP CS4 (32) in the upper 6 bits of the TOS byte
+    setsockopt(sock, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
+    #endif
+#endif
+}
+
 void putint(ucharbuf &p, int n) { putint_(p, n); }
 void putint(packetbuf &p, int n) { putint_(p, n); }
 void putint(vector<uchar> &p, int n) { putint_(p, n); }

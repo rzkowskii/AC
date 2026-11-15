@@ -87,7 +87,11 @@ void connectserv_(const char *servername, int serverport = 0, const char *passwo
     }
 
     if(!clienthost)
+    {
         clienthost = enet_host_create(NULL, 2, 3, 0, 0);
+        extern int netqos;
+        if(clienthost && netqos) setlowlatencysocket(clienthost->socket);
+    }
 
     if(clienthost)
     {
@@ -313,6 +317,21 @@ void cleanupclient()
 // collect c2s messages conveniently
 
 vector<uchar> messages;
+
+// "netqos 1" marks the game's packets for low-latency queueing (see setlowlatencysocket() in protocol.cpp);
+// the dedicated server has the -Q switch for the same. Both are off by default.
+VARP(netqos, 0, 0, 1);
+
+// network traffic since the client's network host was created
+void netstats()
+{
+    if(!clienthost) { conoutf("netstats: not connected"); return; }
+    conoutf("netstats: sent %u packets (%u bytes), received %u packets (%u bytes)", clienthost->totalSentPackets, clienthost->totalSentData,
+            clienthost->totalReceivedPackets, clienthost->totalReceivedData);
+    defformatstring(s)("%u %u %u %u", clienthost->totalSentPackets, clienthost->totalSentData, clienthost->totalReceivedPackets, clienthost->totalReceivedData);
+    result(s);
+}
+COMMAND(netstats, "");
 
 void addmsg(int type, const char *fmt, ...)
 {

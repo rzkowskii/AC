@@ -411,7 +411,8 @@ enum { RP_UPDATE = 0, RP_OCCLUSION, RP_OTHER, RP_SETUP, RP_REFLECTION, RP_WORLDG
        RP_DEPTHRESOLVE, RP_MODELS, RP_HUDGUN, RP_EFFECTS, RP_HUD, RP_SWAP, RP_NUM };
 extern void rpmark(int phase);
 extern double hrclockms();
-extern void resolvedepth(); // rendergl.cpp: turn the previous frame's asynchronous depth read into worldpos
+extern void resolvedepth();
+extern void setlowlatencysocket(ENetSocket sock); // protocol.cpp: DiffServ/Wi-Fi QoS marking for game traffic // rendergl.cpp: turn the previous frame's asynchronous depth read into worldpos
 extern void clearminimap();
 extern void resetzones();
 extern void rendercursor(int x, int y, int w);
@@ -1206,7 +1207,7 @@ struct servercommandline
 {
     int uprate, serverport, syslogfacility, filethres, syslogthres, maxdemos, maxclients, kickthreshold, banthreshold, verbose, incoming_limit, afk_limit, ban_time;
     const char *ip, *master, *logident, *serverpassword, *adminpasswd, *demopath, *maprotfile, *pwdfile, *blfile, *geoipfile, *nbfile, *infopath, *motdpath, *forbidden, *service, *logfilepath, *parfilepath, *ssk, *vitabasename;
-    bool logtimestamp, demo_interm, loggamestatus;
+    bool logtimestamp, demo_interm, loggamestatus, netqos;
     string motd, servdesc_full, servdesc_pre, servdesc_suf, voteperm, mapperm;
     int clfilenesting;
     vector<const char *> adminonlymaps; // FIXME: remove this
@@ -1216,7 +1217,7 @@ struct servercommandline
                             ip(""), master(NULL), logident(""), serverpassword(""), adminpasswd(""), demopath("demos/"),
                             maprotfile("config/maprot.cfg"), pwdfile("config/serverpwd.cfg"), blfile("config/serverblacklist.cfg"), geoipfile("config/geoip.cfg"), nbfile("config/nicknameblacklist.cfg"),
                             infopath("config/serverinfo"), motdpath("config/motd"), forbidden("config/forbidden.cfg"), service(NULL), logfilepath("logs/"), parfilepath("config/serverparameters.cfg"), ssk(NULL), vitabasename("config/servervita"),
-                            logtimestamp(false), demo_interm(false), loggamestatus(true),
+                            logtimestamp(false), demo_interm(false), loggamestatus(true), netqos(false),
                             clfilenesting(0)
     {
         motd[0] = servdesc_full[0] = servdesc_pre[0] = servdesc_suf[0] = voteperm[0] = mapperm[0] = '\0';
@@ -1230,7 +1231,7 @@ struct servercommandline
         int ai = atoi(a);
         // client: dtwhzbsave
         switch(arg[1])
-        { // todo: gjlqEJQU
+        { // todo: gjlqEJU
             case 'Y': // private server key
             {
                 bool allas = true; // a is all A's?
@@ -1261,6 +1262,7 @@ struct servercommandline
             case 'l': loggamestatus = ai != 0; break;
             case 'F': if(isdigit(*a) && ai >= 0 && ai <= 7) syslogfacility = ai; break;
             case 'T': logtimestamp = true; break;
+            case 'Q': netqos = true; break;
             case 'L':
                 switch(*a)
                 {

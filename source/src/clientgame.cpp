@@ -561,6 +561,7 @@ void movelocalplayer()
 
 // use physics to extrapolate player position
 VARP(smoothmove, 0, 75, 100);
+VARP(smoothcurve, 0, 0, 1);
 VARP(smoothdist, 0, 8, 16);
 
 void predictplayer(playerent *d, bool move)
@@ -576,6 +577,11 @@ void predictplayer(playerent *d, bool move)
         d->newpos.z -= d->eyeheight;
     }
     float k = 1.0f - float(lastmillis - d->smoothmillis)/smoothmove;
+    // "smoothcurve 1": ease the correction in and out (smoothstep) instead of applying it at a constant rate, so a
+    // corrected player doesn't visibly speed up and then stop dead. Off by default: it changes where other players are
+    // drawn (and hit) during a correction.
+    extern int smoothcurve;
+    if(smoothcurve && k > 0 && k < 1) { float t = 1 - k; k = 1 - t*t*(3 - 2*t); }
     if(k>0)
     {
         d->o.add(vec(d->deltapos).mul(k));

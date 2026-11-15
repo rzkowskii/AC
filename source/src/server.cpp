@@ -5458,6 +5458,8 @@ void initserver(bool dedicated)
         ENetAddress address = { ENET_HOST_ANY, (enet_uint16)scl.serverport };
         if(scl.ip[0] && enet_address_set_host(&address, scl.ip)<0) mlog(ACLOG_WARNING, "server ip not resolved!");
         serverhost = enet_host_create(&address, scl.maxclients+1, 3, 0, scl.uprate);
+        extern void setlowlatencysocket(ENetSocket sock);
+        if(serverhost && scl.netqos) setlowlatencysocket(serverhost->socket);
         if(!serverhost) fatal("could not create server host");
         loopi(scl.maxclients) serverhost->peers[i].data = (void *)-1;
 

@@ -89,6 +89,7 @@
 // -C     // import commandline options from file (can be used recursively)
 // -l     // If set to 0, disable game status logging from server logs
 // -T     // Add timestamps to every line of the console and file logs.
+// -Q     // Mark the server's packets as real-time interactive traffic (DiffServ class CS4; on macOS the network service type), default off, no effect on Windows
 // -LF    // Sets the logging level for file logs (0..5), default 2 (Win & Mac) or 5 (Linux)
 // -LS    // Sets the logging level for syslog logging (0..5), default 2 (Linux) or 5 (Win & Mac)
           //    The following levels can be selected (-LF & -LS):
