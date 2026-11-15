@@ -145,6 +145,7 @@ CLIENT_OBJS= \
 	editing.o \
 	entities.o \
 	gfx_gl.o \
+	gfx_sdlgpu.o \
 	http.o \
 	log.o \
 	main.o \
@@ -500,7 +501,7 @@ bot/ac_bot_ai.o: console.h protos.h bot/bot.h bot/bot_util.h
 bot/ac_bot_ai.o: bot/bot_waypoint.h bot/ac_bot.h
 
 cube.h.gch: platform.h tools.h geom.h model.h protocol.h sound.h weapon.h
-cube.h.gch: entity.h world.h command.h varray.h vote.h console.h protos.h
+cube.h.gch: entity.h world.h command.h varray.h vote.h console.h protos.h gfx.h
 
 crypto-standalone.o: cube.h platform.h tools.h geom.h model.h protocol.h
 crypto-standalone.o: sound.h weapon.h entity.h world.h command.h varray.h

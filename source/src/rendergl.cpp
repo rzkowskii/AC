@@ -57,7 +57,7 @@ void *getprocaddress(const char *name)
 bool hasext(const char *exts, const char *ext)
 {
     int len = strlen(ext);
-    if(len) for(const char *cur = exts; (cur = strstr(cur, ext)); cur += len)
+    if(exts && len) for(const char *cur = exts; (cur = strstr(cur, ext)); cur += len)
     {
         if((cur == exts || cur[-1] == ' ') && (cur[len] == ' ' || !cur[len])) return true;
     }
@@ -66,7 +66,8 @@ bool hasext(const char *exts, const char *ext)
 
 void glext(char *ext)
 {
-    const char *exts = (const char *)glGetString(GL_EXTENSIONS);
+    // no GL context with the GPU backend: answer for what it implements itself (the menus ask before enabling water reflections and stencil shadows)
+    const char *exts = gfx_legacygl() ? (const char *)glGetString(GL_EXTENSIONS) : "GL_ARB_multitexture GL_EXT_texture_env_combine GL_ARB_vertex_buffer_object GL_EXT_framebuffer_object GL_EXT_texture_filter_anisotropic GL_ARB_fragment_program GL_ATI_separate_stencil GL_EXT_stencil_wrap";
     intret(hasext(exts, ext) ? 1 : 0);
 }
 COMMAND(glext, "s");
@@ -75,6 +76,15 @@ VAR(ati_mda_bug, 0, 0, 1);
 
 void gl_checkextensions()
 {
+    if(!gfx_legacygl())
+    {
+        // the GPU backend implements the paths the GL renderer takes with these (gfx_sdlgpu.cpp)
+        hasTE = hasMT = hasMDA = hasDRE = hasVBO = hasFBO = hasAF = true;
+        hasPBO = hasstencil = hasST2 = hasSTW = hasSTS = hasDBF = false;
+        hwmaxaniso = 16;
+        conoutf("Renderer: %s", gfx->name());
+        return;
+    }
     const char *vendor = (const char *)glGetString(GL_VENDOR);
     const char *exts = (const char *)glGetString(GL_EXTENSIONS);
     const char *renderer = (const char *)glGetString(GL_RENDERER);
@@ -214,28 +224,28 @@ void gl_init(int w, int h, int depth, int fsaa)
 {
     if(depth > 0) scenedepthbits = depth;
     GLint samplebuffers = 0;
-    glGetIntegerv(GL_SAMPLE_BUFFERS, &samplebuffers);
+    gfx->getintegerv(GL_SAMPLE_BUFFERS, &samplebuffers);
     multisampled = samplebuffers > 0;
     //#define fogvalues 0.5f, 0.6f, 0.7f, 1.0f
 
-    glViewport(0, 0, w, h);
-    glClearDepth(1.0);
-    glDepthFunc(GL_LESS);
-    glEnable(GL_DEPTH_TEST);
-    glShadeModel(GL_SMOOTH);
+    gfx->viewport(0, 0, w, h);
+    gfx->cleardepth(1.0);
+    gfx->depthfunc(GL_LESS);
+    gfx->enable(GL_DEPTH_TEST);
+    gfx->shademodel(GL_SMOOTH);
 
 
-    glEnable(GL_FOG);
-    glFogi(GL_FOG_MODE, GL_LINEAR);
-    glFogf(GL_FOG_DENSITY, 0.25);
-    glHint(GL_FOG_HINT, GL_NICEST);
+    gfx->enable(GL_FOG);
+    gfx->fogi(GL_FOG_MODE, GL_LINEAR);
+    gfx->fogf(GL_FOG_DENSITY, 0.25);
+    gfx->hint(GL_FOG_HINT, GL_NICEST);
 
 
-    glEnable(GL_LINE_SMOOTH);
-    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+    gfx->enable(GL_LINE_SMOOTH);
+    gfx->hint(GL_LINE_SMOOTH_HINT, GL_NICEST);
 
-    glCullFace(GL_FRONT);
-    glEnable(GL_CULL_FACE);
+    gfx->cullface(GL_FRONT);
+    gfx->enable(GL_CULL_FACE);
 
     inittmus();
 
@@ -284,126 +294,126 @@ void disablepolygonoffset(GLenum type, bool restore)
 
 void line(int x1, int y1, float z1, int x2, int y2, float z2)
 {
-    glBegin(GL_TRIANGLE_STRIP);
-    glVertex3f((float)x1, (float)y1, z1);
-    glVertex3f((float)x1, y1+0.01f, z1);
-    glVertex3f((float)x2, (float)y2, z2);
-    glVertex3f((float)x2, y2+0.01f, z2);
-    glEnd();
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->vertex3f((float)x1, (float)y1, z1);
+    gfx->vertex3f((float)x1, y1+0.01f, z1);
+    gfx->vertex3f((float)x2, (float)y2, z2);
+    gfx->vertex3f((float)x2, y2+0.01f, z2);
+    gfx->end();
     xtraverts += 4;
 }
 
 void line(int x1, int y1, int x2, int y2, color *c)
 {
-    glDisable(GL_BLEND);
-    if(c) glColor4f(c->r, c->g, c->b, c->alpha);
-    glBegin(GL_LINES);
-    glVertex2f((float)x1, (float)y1);
-    glVertex2f((float)x2, (float)y2);
-    glEnd();
-    glEnable(GL_BLEND);
+    gfx->disable(GL_BLEND);
+    if(c) gfx->color4f(c->r, c->g, c->b, c->alpha);
+    gfx->begin(GL_LINES);
+    gfx->vertex2f((float)x1, (float)y1);
+    gfx->vertex2f((float)x2, (float)y2);
+    gfx->end();
+    gfx->enable(GL_BLEND);
 }
 
 
 void linestyle(float width, int r, int g, int b)
 {
-    glLineWidth(width);
-    glColor3ub(r,g,b);
+    gfx->linewidth(width);
+    gfx->color3ub(r,g,b);
 }
 
 VARP(oldselstyle, 0, 1, 1); // Make the old (1004) grid/selection style default (render as quads rather than tris)
 
 void box(block &b, float z1, float z2, float z3, float z4)
 {
-    glBegin((oldselstyle ? GL_QUADS : GL_TRIANGLE_STRIP));
-    glVertex3f((float)b.x,      (float)b.y,      z1);
-    glVertex3f((float)b.x+b.xs, (float)b.y,      z2);
-    glVertex3f((float)(oldselstyle ? b.x+b.xs : b.x), (float)b.y+b.ys, (oldselstyle ? z3 : z4));
-    glVertex3f((float)(oldselstyle ? b.x : b.x+b.xs), (float)b.y+b.ys, (oldselstyle ? z4 : z3));
-    glEnd();
+    gfx->begin((oldselstyle ? GL_QUADS : GL_TRIANGLE_STRIP));
+    gfx->vertex3f((float)b.x,      (float)b.y,      z1);
+    gfx->vertex3f((float)b.x+b.xs, (float)b.y,      z2);
+    gfx->vertex3f((float)(oldselstyle ? b.x+b.xs : b.x), (float)b.y+b.ys, (oldselstyle ? z3 : z4));
+    gfx->vertex3f((float)(oldselstyle ? b.x : b.x+b.xs), (float)b.y+b.ys, (oldselstyle ? z4 : z3));
+    gfx->end();
     xtraverts += 4;
 }
 
 void box2d(int x1, int y1, int x2, int y2, int gray)
 {
-    glColor3ub(gray, gray, gray);
-    glBegin(GL_LINE_LOOP);
-    glVertex2f(x1, y1);
-    glVertex2f(x2, y1);
-    glVertex2f(x2, y2);
-    glVertex2f(x1, y2);
-    glEnd();
+    gfx->color3ub(gray, gray, gray);
+    gfx->begin(GL_LINE_LOOP);
+    gfx->vertex2f(x1, y1);
+    gfx->vertex2f(x2, y1);
+    gfx->vertex2f(x2, y2);
+    gfx->vertex2f(x1, y2);
+    gfx->end();
 }
 
 void quad(GLuint tex, float x, float y, float s, float tx, float ty, float tsx, float tsy)
 {
     if(!tsy) tsy = tsx;
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glBegin(GL_TRIANGLE_STRIP);
-    glTexCoord2f(tx,     ty);     glVertex2f(x,   y);
-    glTexCoord2f(tx+tsx, ty);     glVertex2f(x+s, y);
-    glTexCoord2f(tx,     ty+tsy); glVertex2f(x,   y+s);
-    glTexCoord2f(tx+tsx, ty+tsy); glVertex2f(x+s, y+s);
-    glEnd();
+    gfx->bindtexture(GL_TEXTURE_2D, tex);
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->texcoord2f(tx,     ty);     gfx->vertex2f(x,   y);
+    gfx->texcoord2f(tx+tsx, ty);     gfx->vertex2f(x+s, y);
+    gfx->texcoord2f(tx,     ty+tsy); gfx->vertex2f(x,   y+s);
+    gfx->texcoord2f(tx+tsx, ty+tsy); gfx->vertex2f(x+s, y+s);
+    gfx->end();
     xtraverts += 4;
 }
 
 void quad(GLuint tex, const vec &c1, const vec &c2, float tx, float ty, float tsx, float tsy)
 {
     if(!tsy) tsy = tsx;
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glBegin(GL_TRIANGLE_STRIP);
-    glTexCoord2f(tx,     ty);     glVertex3f(c1.x, c1.y, c1.z);
-    glTexCoord2f(tx+tsx, ty);     glVertex3f(c2.x, c1.y, c1.z);
-    glTexCoord2f(tx,     ty+tsy); glVertex3f(c1.x, c2.y, c2.z);
-    glTexCoord2f(tx+tsx, ty+tsy); glVertex3f(c2.x, c2.y, c2.z);
-    glEnd();
+    gfx->bindtexture(GL_TEXTURE_2D, tex);
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->texcoord2f(tx,     ty);     gfx->vertex3f(c1.x, c1.y, c1.z);
+    gfx->texcoord2f(tx+tsx, ty);     gfx->vertex3f(c2.x, c1.y, c1.z);
+    gfx->texcoord2f(tx,     ty+tsy); gfx->vertex3f(c1.x, c2.y, c2.z);
+    gfx->texcoord2f(tx+tsx, ty+tsy); gfx->vertex3f(c2.x, c2.y, c2.z);
+    gfx->end();
     xtraverts += 4;
 }
 
 void circle(GLuint tex, float x, float y, float r, float tx, float ty, float tr, int subdiv)
 {
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glBegin(GL_TRIANGLE_FAN);
-    glTexCoord2f(tx, ty);
-    glVertex2f(x, y);
+    gfx->bindtexture(GL_TEXTURE_2D, tex);
+    gfx->begin(GL_TRIANGLE_FAN);
+    gfx->texcoord2f(tx, ty);
+    gfx->vertex2f(x, y);
     loopi(subdiv+1)
     {
         float c = cosf(PI2 * i / float(subdiv)), s = sinf(PI2 * i / float(subdiv));
-        glTexCoord2f(tx + tr*c, ty + tr*s);
-        glVertex2f(x + r*c, y + r*s);
+        gfx->texcoord2f(tx + tr*c, ty + tr*s);
+        gfx->vertex2f(x + r*c, y + r*s);
     }
-    glEnd();
+    gfx->end();
     xtraverts += subdiv+2;
 }
 
 void dot(int x, int y, float z)
 {
     const float DOF = 0.1f;
-    glBegin(GL_TRIANGLE_STRIP);
-    glVertex3f(x-DOF, y-DOF, z);
-    glVertex3f(x+DOF, y-DOF, z);
-    glVertex3f(x-DOF, y+DOF, z);
-    glVertex3f(x+DOF, y+DOF, z);
-    glEnd();
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->vertex3f(x-DOF, y-DOF, z);
+    gfx->vertex3f(x+DOF, y-DOF, z);
+    gfx->vertex3f(x-DOF, y+DOF, z);
+    gfx->vertex3f(x+DOF, y+DOF, z);
+    gfx->end();
     xtraverts += 4;
 }
 
 void blendbox(int x1, int y1, int x2, int y2, bool border, int tex, color *c)
 {
-    glDepthMask(GL_FALSE);
+    gfx->depthmask(GL_FALSE);
     if(tex>=0)
     {
-        glBindTexture(GL_TEXTURE_2D, tex);
+        gfx->bindtexture(GL_TEXTURE_2D, tex);
         if(c)
         {
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glColor4f(c->r, c->g, c->b, c->alpha);
+            gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            gfx->color4f(c->r, c->g, c->b, c->alpha);
         }
         else
         {
-            glDisable(GL_BLEND);
-            glColor3f(1, 1, 1);
+            gfx->disable(GL_BLEND);
+            gfx->color3f(1, 1, 1);
         }
 
         int texw = 512;
@@ -432,69 +442,69 @@ void blendbox(int x1, int y1, int x2, int y2, bool border, int tex, color *c)
                     xtexcut = (float)(((i+1)*texw)-(x2-x1))/texw;
                 }
 
-                glBegin(GL_TRIANGLE_STRIP);
-                glTexCoord2f(0, 0);                 glVertex2f((float)x1+texw*i, (float)y1+texh*j);
-                glTexCoord2f(1-xtexcut, 0);         glVertex2f(x1+texw*(i+1)-xboxcut, (float)y1+texh*j);
-                glTexCoord2f(0, 1-ytexcut);         glVertex2f((float)x1+texw*i, y1+texh*(j+1)-yboxcut);
-                glTexCoord2f(1-xtexcut, 1-ytexcut); glVertex2f(x1+texw*(i+1)-xboxcut, (float)y1+texh*(j+1)-yboxcut);
-                glEnd();
+                gfx->begin(GL_TRIANGLE_STRIP);
+                gfx->texcoord2f(0, 0);                 gfx->vertex2f((float)x1+texw*i, (float)y1+texh*j);
+                gfx->texcoord2f(1-xtexcut, 0);         gfx->vertex2f(x1+texw*(i+1)-xboxcut, (float)y1+texh*j);
+                gfx->texcoord2f(0, 1-ytexcut);         gfx->vertex2f((float)x1+texw*i, y1+texh*(j+1)-yboxcut);
+                gfx->texcoord2f(1-xtexcut, 1-ytexcut); gfx->vertex2f(x1+texw*(i+1)-xboxcut, (float)y1+texh*(j+1)-yboxcut);
+                gfx->end();
             }
         }
 
-        if(!c) glEnable(GL_BLEND);
+        if(!c) gfx->enable(GL_BLEND);
     }
     else
     {
-        glDisable(GL_TEXTURE_2D);
+        gfx->disable(GL_TEXTURE_2D);
 
         if(c)
         {
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-            glColor4f(c->r, c->g, c->b, c->alpha);
+            gfx->blendfunc(GL_SRC_ALPHA, GL_ONE);
+            gfx->color4f(c->r, c->g, c->b, c->alpha);
         }
         else
         {
-            glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
-            glColor3f(0.5f, 0.5f, 0.5f);
+            gfx->blendfunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+            gfx->color3f(0.5f, 0.5f, 0.5f);
         }
 
-        glBegin(GL_TRIANGLE_STRIP);
-        glTexCoord2f(0, 0); glVertex2f(x1, y1);
-        glTexCoord2f(1, 0); glVertex2f(x2, y1);
-        glTexCoord2f(0, 1); glVertex2f(x1, y2);
-        glTexCoord2f(1, 1); glVertex2f(x2, y2);
-        glEnd();
+        gfx->begin(GL_TRIANGLE_STRIP);
+        gfx->texcoord2f(0, 0); gfx->vertex2f(x1, y1);
+        gfx->texcoord2f(1, 0); gfx->vertex2f(x2, y1);
+        gfx->texcoord2f(0, 1); gfx->vertex2f(x1, y2);
+        gfx->texcoord2f(1, 1); gfx->vertex2f(x2, y2);
+        gfx->end();
         xtraverts += 4;
     }
 
     if(border)
     {
-        glDisable(GL_BLEND);
-        if(tex>=0) glDisable(GL_TEXTURE_2D);
+        gfx->disable(GL_BLEND);
+        if(tex>=0) gfx->disable(GL_TEXTURE_2D);
         box2d(x1, y1, x2, y2, 155);
-        glEnable(GL_BLEND);
+        gfx->enable(GL_BLEND);
     }
 
-    if(tex<0 || border) glEnable(GL_TEXTURE_2D);
-    glDepthMask(GL_TRUE);
+    if(tex<0 || border) gfx->enable(GL_TEXTURE_2D);
+    gfx->depthmask(GL_TRUE);
 }
 
 void framedquadtexture(GLuint tex, int x, int y, int xs, int ys, int border, int backlight, bool blend)
 {
     if(border) blendbox(x - border, y - border, x + xs + border, y + ys + border, false);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    if(blend) glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    else glDisable(GL_BLEND);
-    glColor3ub(backlight, backlight, backlight);
-    glBegin(GL_TRIANGLE_STRIP);
-    glTexCoord2f(0, 0); glVertex2f(x,      y);
-    glTexCoord2f(1, 0); glVertex2f(x + xs, y);
-    glTexCoord2f(0, 1); glVertex2f(x,      y + ys);
-    glTexCoord2f(1, 1); glVertex2f(x + xs, y + ys);
-    glEnd();
+    gfx->bindtexture(GL_TEXTURE_2D, tex);
+    if(blend) gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    else gfx->disable(GL_BLEND);
+    gfx->color3ub(backlight, backlight, backlight);
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->texcoord2f(0, 0); gfx->vertex2f(x,      y);
+    gfx->texcoord2f(1, 0); gfx->vertex2f(x + xs, y);
+    gfx->texcoord2f(0, 1); gfx->vertex2f(x,      y + ys);
+    gfx->texcoord2f(1, 1); gfx->vertex2f(x + xs, y + ys);
+    gfx->end();
     xtraverts += 4;
     dimeditinfopanel = 99;
-    if(!blend) glEnable(GL_BLEND);
+    if(!blend) gfx->enable(GL_BLEND);
 }
 
 VARP(aboveheadiconsize, 0, 50, 1000);
@@ -504,18 +514,18 @@ void renderaboveheadicon(playerent *p)
 {
     int t = lastmillis-p->lastvoicecom;
     if(!aboveheadiconsize || !p->lastvoicecom || t > aboveheadiconfadetime) return;
-    glPushMatrix();
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glEnable(GL_BLEND);
-    glTranslatef(p->o.x, p->o.y, p->o.z+p->aboveeye);
-    glRotatef(camera1->yaw-180, 0, 0, 1);
-    glColor3f(1.0f, 0.0f, 0.0f);
+    gfx->pushmatrix();
+    gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    gfx->enable(GL_BLEND);
+    gfx->translate(p->o.x, p->o.y, p->o.z+p->aboveeye);
+    gfx->rotate(camera1->yaw-180, 0, 0, 1);
+    gfx->color3f(1.0f, 0.0f, 0.0f);
     static Texture *tex = NULL;
     if(!tex) tex = textureload("packages/misc/com.png");
     float s = aboveheadiconsize/100.0f;
     quad(tex->id, vec(s/2.0f, 0.0f, s), vec(s/-2.0f, 0.0f, 0.0f), 0.0f, 0.0f, 1.0f, 1.0f);
-    glDisable(GL_BLEND);
-    glPopMatrix();
+    gfx->disable(GL_BLEND);
+    gfx->popmatrix();
 }
 
 void rendercursor(int x, int y, int w)
@@ -1223,6 +1233,9 @@ void resolvedepth() // called at the start of a frame, before input and game upd
     }
 }
 
+// the crosshair's current target (testing: compares the renderers' crosshair pick passes)
+COMMANDF(crosshairtarget, "", () { defformatstring(s)("%.4f %.4f %.4f", worldpos.x, worldpos.y, worldpos.z); result(s); });
+
 static void cleanupdepthread()
 {
     gfx->cleanuppick();
@@ -1322,6 +1335,8 @@ VARP(ignoreoverride_nowaterreflect, 0, 0, 1);
 VARP(ignoreoverride_nostencilshadows, 0, 0, 1);
 
 int effective_stencilshadow = 0;
+// "stage1only 1" (testing): the GL renderer also stops after what the GPU backend draws so far, for like-for-like comparisons
+VAR(stage1only, 0, 0, 1);
 
 bool isoverview = false;
 
@@ -1329,10 +1344,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 {
     extern int mapoverride_nostencilshadows, mapoverride_nowaterreflect;
     effective_stencilshadow = mapoverride_nostencilshadows && !ignoreoverride_nostencilshadows ? 0 : stencilshadow;
-    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect);
+    bool effective_waterreflect = waterreflect && !editmode && (!mapoverride_nowaterreflect || ignoreoverride_nowaterreflect) && gfx_legacygl();
 
     dodynlights();
-    drawminimap(w, h);
+    if(gfx_legacygl()) drawminimap(w, h); // (not ported to the GPU backend yet)
 
     recomputecamera();
 
@@ -1455,6 +1470,17 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     resettmu(0);
 
     gfx->disable(GL_CULL_FACE);
+
+    if(!gfx_legacygl() || stage1only) // not ported to the GPU backend yet: particles, water, editor, post-processing, HUD
+    {
+        gfx->disable(GL_FOG);
+        gfx->disable(GL_TEXTURE_2D);
+        gfx->enable(GL_CULL_FACE);
+        gfx->enable(GL_FOG);
+        undodynlights();
+        rpmark(RP_HUD);
+        return;
+    }
 
     render_particles(curtime, PT_DECAL_MASK);
 

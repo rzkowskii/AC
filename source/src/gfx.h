@@ -21,6 +21,13 @@ struct gfxdevice
     virtual int api() const = 0;
     virtual const char *name() const = 0;
 
+    // --- device and presentation
+    virtual bool init(SDL_Window *window, int samples, int vsync) { return true; } // (the GL context is made by main.cpp)
+    virtual int getdepthbits() { return 0; }
+    virtual int getsamples() { return 0; }
+    virtual void present() = 0;                                 // shows the frame (GL: SDL_GL_SwapWindow)
+    virtual void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data) = 0; // like glReadPixels
+
     // --- frame and targets
     virtual void viewport(int x, int y, int w, int h) = 0;
     virtual void clearcolor(float r, float g, float b, float a) = 0;
@@ -53,6 +60,7 @@ struct gfxdevice
     virtual void cullface(GLenum face) = 0;
     virtual void alphafunc(GLenum func, GLfloat ref) = 0;
     virtual void polygonoffset(GLfloat factor, GLfloat units) = 0;
+    virtual void linewidth(GLfloat w) = 0;
     virtual void color3f(GLfloat r, GLfloat g, GLfloat b) = 0;
     virtual void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) = 0;
     virtual void color3ub(GLubyte r, GLubyte g, GLubyte b) = 0;

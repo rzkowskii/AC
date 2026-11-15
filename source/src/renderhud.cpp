@@ -1325,6 +1325,7 @@ Texture *startscreen = NULL;
 void loadingscreen(const char *fmt, ...)
 {
     if(!startscreen) startscreen = textureload("packages/misc/startscreen.png", 3);
+    if(!gfx_legacygl()) return; // (not ported to the GPU backend yet)
 
     glEnable(GL_TEXTURE_2D);
     glDisable(GL_DEPTH_TEST);
@@ -1387,6 +1388,7 @@ static void bar(float bar, int o, float r, float g, float b)
 void show_out_of_renderloop_progress(float bar1, const char *text1, float bar2, const char *text2)   // also used during loading
 {
     c2skeepalive();
+    if(!gfx_legacygl()) return; // (not ported to the GPU backend yet)
 
     glDisable(GL_DEPTH_TEST);
     glMatrixMode(GL_MODELVIEW);

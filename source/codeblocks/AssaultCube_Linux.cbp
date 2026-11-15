@@ -230,6 +230,7 @@
 		<Unit filename="../src/protos.h" />
 		<Unit filename="../src/rendercubes.cpp" />
 		<Unit filename="../src/gfx_gl.cpp" />
+		<Unit filename="../src/gfx_sdlgpu.cpp" />
 		<Unit filename="../src/shaders.cpp" />
 		<Unit filename="../src/stbimage.cpp" />
 		<Unit filename="../src/rendergl.cpp" />

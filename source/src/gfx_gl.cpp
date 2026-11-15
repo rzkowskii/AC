@@ -20,6 +20,10 @@ extern PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC glCheckFramebufferStatus_;
 #define GL_DEPTH_COMPONENT32F 0x8CAC
 #endif
 
+// "benchnopresent 1" (testing): frames are rendered but not shown, which measures rendering without the display's limits
+// (a Metal window can't present faster than the display refreshes; Apple's GL can, though the extra frames are never seen)
+VAR(benchnopresent, 0, 0, 1);
+
 struct glbackend : gfxdevice
 {
     // crosshair pick target and the pixel buffer object depth reads go through
@@ -29,6 +33,9 @@ struct glbackend : gfxdevice
 
     int api() const { return GFX_OPENGL; }
     const char *name() const { return "OpenGL"; }
+
+    void present() { if(benchnopresent) glFlush(); else SDL_GL_SwapWindow(screen); }
+    void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data) { glReadPixels(x, y, w, h, format, type, data); }
 
     void viewport(int x, int y, int w, int h) { glViewport(x, y, w, h); }
     void clearcolor(float r, float g, float b, float a) { glClearColor(r, g, b, a); }
@@ -59,6 +66,7 @@ struct glbackend : gfxdevice
     void cullface(GLenum face) { glCullFace(face); }
     void alphafunc(GLenum func, GLfloat ref) { glAlphaFunc(func, ref); }
     void polygonoffset(GLfloat factor, GLfloat units) { glPolygonOffset(factor, units); }
+    void linewidth(GLfloat w) { glLineWidth(w); }
     void color3f(GLfloat r, GLfloat g, GLfloat b) { glColor3f(r, g, b); }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glColor4f(r, g, b, a); }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { glColor3ub(r, g, b); }

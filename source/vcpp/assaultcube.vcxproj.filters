@@ -236,6 +236,9 @@
     <ClCompile Include="..\src\gfx_gl.cpp">
       <Filter>render</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\gfx_sdlgpu.cpp">
+      <Filter>render</Filter>
+    </ClCompile>
     <ClCompile Include="..\src\shaders.cpp">
       <Filter>render</Filter>
     </ClCompile>

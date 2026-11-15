@@ -428,6 +428,10 @@
 			<Option target="default" />
 			<Option target="debug" />
 		</Unit>
+		<Unit filename="../src/gfx_sdlgpu.cpp">
+			<Option target="default" />
+			<Option target="debug" />
+		</Unit>
 		<Unit filename="../src/shaders.cpp">
 			<Option target="default" />
 			<Option target="debug" />

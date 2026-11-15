@@ -148,7 +148,7 @@ void renderclip(int type, int x, int y, float xs, float ys, float h, float elev,
         bb[i].add(o);
     }
 
-    glDisable(GL_TEXTURE_2D);
+    gfx->disable(GL_TEXTURE_2D);
     switch(type)
     {
         case CLIP:     linestyle(1, 0xFF, 0xFF, 0); break;  // yellow
@@ -156,15 +156,15 @@ void renderclip(int type, int x, int y, float xs, float ys, float h, float elev,
         case PLCLIP:   linestyle(1, 0xFF, 0, 0xFF); break;  // magenta
         case LADDER:   linestyle(1, 0, 0, 0xFF);    break;  // blue
     }
-    glBegin(GL_LINES);
+    gfx->begin(GL_LINES);
     loopi(16)
     {
         int j = ((i + 1) % 8) / 2;
-        glVertex3f(bb[j].x, bb[j].y, bb[j].z + (i > 7 ? h : 0));
+        gfx->vertex3f(bb[j].x, bb[j].y, bb[j].z + (i > 7 ? h : 0));
     }
-    loopi(8) glVertex3f(bb[i / 2].x, bb[i / 2].y, bb[i / 2].z + (i & 1 ? h : 0));
-    glEnd();
-    glEnable(GL_TEXTURE_2D);
+    loopi(8) gfx->vertex3f(bb[i / 2].x, bb[i / 2].y, bb[i / 2].z + (i & 1 ? h : 0));
+    gfx->end();
+    gfx->enable(GL_TEXTURE_2D);
 }
 
 void rendermapmodels()
@@ -209,7 +209,7 @@ VARP(entarrowstyle,0,1,1);
 void renderentarrow(const entity &e, const vec &dir, float radius, GLfloat color[4])
 {
     if(cleanedit || radius <= 0) return;
-    glColor4f(color[0],color[1],color[2],color[3]);
+    gfx->color4f(color[0],color[1],color[2],color[3]);
     float arrowsize = min(radius/8, 0.5f);
     vec spoke;
     spoke.orthogonal(dir);
@@ -218,37 +218,37 @@ void renderentarrow(const entity &e, const vec &dir, float radius, GLfloat color
     arrowsize += arrowsize/2.0f;
     vec epos(e.x, e.y, e.z);
     vec target = vec(dir).mul(radius).add(epos), arrowbase = vec(dir).mul(radius - arrowsize).add(epos);
-    glDisable(GL_TEXTURE_2D); // this disables reaction to light, but also emphasizes shadows .. a nice effect, but should be independent
-    glDisable(GL_CULL_FACE);
-    glLineWidth(3);
-    glBegin(GL_LINES);
-    glVertex3fv(epos.v);
-    glVertex3fv(target.v);
-    glEnd();
+    gfx->disable(GL_TEXTURE_2D); // this disables reaction to light, but also emphasizes shadows .. a nice effect, but should be independent
+    gfx->disable(GL_CULL_FACE);
+    gfx->linewidth(3);
+    gfx->begin(GL_LINES);
+    gfx->vertex3f(epos.x, epos.y, epos.z);
+    gfx->vertex3f(target.x, target.y, target.z);
+    gfx->end();
     switch(entarrowstyle)
     {
         case 0: // 4seg cone at tip
             {
-                glBegin(GL_TRIANGLE_FAN);
-                glVertex3fv(target.v);
+                gfx->begin(GL_TRIANGLE_FAN);
+                gfx->vertex3f(target.x, target.y, target.z);
                 loopi(5)
                 {
                     vec p(spoke);
                     p.rotate(PI2 * i / 4.0f, dir);
                     p.add(arrowbase);
-                    glVertex3fv(p.v);
+                    gfx->vertex3f(p.x, p.y, p.z);
                 }
-                glEnd();
+                gfx->end();
 
             }
         break;
         case 1: // 4 rotated & tinted tips
             {
                 float rothead[] = {0,PI/2,PI/4,3*PI/4};
-                glBegin(GL_TRIANGLES);
+                gfx->begin(GL_TRIANGLES);
                 loopi(4)
                 {
-                    glVertex3fv(target.v);
+                    gfx->vertex3f(target.x, target.y, target.z);
                     vec p1(spoke);
                     vec p2(spoke.mul(-1));
                     if(i>0)
@@ -259,21 +259,21 @@ void renderentarrow(const entity &e, const vec &dir, float radius, GLfloat color
                     if(i==2)
                     {
                         float csf = (((color[1]+color[2]+color[3])/3.0f)>0.5f)?.75f:1.25f;
-                        glColor4f( csf*color[0], csf*color[1], csf*color[2], color[3]>0.5f?(color[3]/2.0f):(color[3]*2.0f) );
+                        gfx->color4f( csf*color[0], csf*color[1], csf*color[2], color[3]>0.5f?(color[3]/2.0f):(color[3]*2.0f) );
                     }
                     p1.add(arrowbase);
-                    glVertex3fv(p1.v);
+                    gfx->vertex3f(p1.x, p1.y, p1.z);
                     p2.add(arrowbase);
-                    glVertex3fv(p2.v);
+                    gfx->vertex3f(p2.x, p2.y, p2.z);
                 }
-                glEnd();
+                gfx->end();
             }
         break;
         default: break;
     }
-    glLineWidth(1);
-    glEnable(GL_CULL_FACE);
-    glEnable(GL_TEXTURE_2D);
+    gfx->linewidth(1);
+    gfx->enable(GL_CULL_FACE);
+    gfx->enable(GL_TEXTURE_2D);
 }
 
 void renderentarrow(const entity &e, const vec &dir, float radius)
@@ -373,11 +373,11 @@ void rendereditentities()
                 }
                 if(i == closest)
                 {
-                    //glColor3f(0, 1, 1);//default for 3arg renderentarrow now
+                    //gfx->color3f(0, 1, 1);//default for 3arg renderentarrow now
                     vec dir(0, -1, 0);
                     dir.rotate_around_z(float(e.attr1) / ENTSCALE10 * RAD);
                     renderentarrow(e, dir, 4);
-                    glColor3f(1, 1, 1);
+                    gfx->color3f(1, 1, 1);
                 }
                 break;
             case DUMMYENT: // sparkly will be golden unless closestent
@@ -390,7 +390,7 @@ void rendereditentities()
                     dir.y *= cos4pitch;
                     GLfloat color[4] = {0.5f,0.5f,0.5f,1.0f};
                     renderentarrow(e, dir, 4, color);
-                    glColor3f(1, 1, 1);
+                    gfx->color3f(1, 1, 1);
                 }
                 break;
         }

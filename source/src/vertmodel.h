@@ -1131,7 +1131,7 @@ struct vertmodel : model
 
         void genshadows(float height, float rad)
         {
-            if(shadows) return;
+            if(shadows || !gfx_legacygl()) return; // (rendered with GL; the GPU backend draws no blob shadows yet)
 
             char *filename = shadowfile();
             if(filename && loadshadows(filename)) return;

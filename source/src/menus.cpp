@@ -1291,11 +1291,11 @@ void rendermenumdl()
     gmenu &m = *curmenu;
     if(!m.mdl) return;
 
-    glPushMatrix();
-    glLoadIdentity();
-    glRotatef(90+180, 0, -1, 0);
-    glRotatef(90, -1, 0, 0);
-    glScalef(1, -1, 1);
+    gfx->pushmatrix();
+    gfx->loadidentity();
+    gfx->rotate(90+180, 0, -1, 0);
+    gfx->rotate(90, -1, 0, 0);
+    gfx->scale(1, -1, 1);
 
     bool isplayermodel = !strncmp(m.mdl, "playermodels", strlen("playermodels"));
     bool isweapon = !strncmp(m.mdl, "weapons", strlen("weapons"));
@@ -1324,7 +1324,7 @@ void rendermenumdl()
     float scale = (m.scale ? m.scale * 0.04f: 1.0f) * 0.25f;
     rendermodel(isplayermodel ? "playermodels" : m.mdl, m.anim|ANIM_DYNALLOC, tex, -1, pos, 0, yaw, pitch, 0, 0, NULL, a, scale);
 
-    glPopMatrix();
+    gfx->popmatrix();
     dimeditinfopanel = 0;
 }
 

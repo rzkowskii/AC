@@ -109,6 +109,7 @@ VARF(fsaa, -1, -1, 16, initwarning("anti-aliasing"));
 VARF(vsync, -1, -1, 1, initwarning("vertical sync"));
 VARF(highdpi, 0, 1, 1, initwarning("high-DPI rendering")); // render at native pixel resolution on Retina/HiDPI displays instead of being upscaled
 
+bool usegpu = false; // --gpu: SDL GPU renderer (gfx_sdlgpu.cpp)
 static int windoww = 0, windowh = 0; // window size in screen coordinates (points); screenw/screenh are the drawable size in pixels
 
 VAR(desktopw, 1, 0, 0); // resolution of desktop (assumed to be maximum resolution)
@@ -430,15 +431,15 @@ void mapscreenshot(const char *imagepath, bool mapshot, int fileformat, float sc
     }
     else
     {
-        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        gfx->pixelstorei(GL_PACK_ALIGNMENT, 1);
         if(src_w != dst_w || src_h != dst_h)
         { // scale image
             uchar *tmpsrc = new uchar[src_w * src_h * 3];
-            glReadPixels(0, 0, src_w, src_h, GL_RGB, GL_UNSIGNED_BYTE, tmpsrc);
+            gfx->readpixels(0, 0, src_w, src_h, GL_RGB, GL_UNSIGNED_BYTE, tmpsrc);
             scaletexture(tmpsrc, src_w, src_h, 3, tmpdst, dst_w, dst_h);
             delete[] tmpsrc;
         }
-        else glReadPixels(0, 0, dst_w, dst_h, GL_RGB, GL_UNSIGNED_BYTE, tmpdst);
+        else gfx->readpixels(0, 0, dst_w, dst_h, GL_RGB, GL_UNSIGNED_BYTE, tmpdst);
         int crop_w = height ? ((dst_w - img_w) / 2) * 3 : 0;
         int crop_h = height ? (dst_h - img_h) / 2 : 0;
         loopirev(img_h)
@@ -767,6 +768,27 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
     if(highdpi) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if(fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+
+    if(usegpu)
+    {
+        // SDL GPU renderer: no GL context; the GPU device takes over the window. Falls back to OpenGL if it can't.
+        screen = SDL_CreateWindow("AssaultCube", winw, winh, flags);
+        if(screen && gfx_sdlgpu()->init(screen, fsaa > 0 ? fsaa : 0, vsync))
+        {
+            gfx = gfx_sdlgpu();
+            if(fullscreen) setfullscreenmode();
+            updatescreensize();
+            inputgrab(grabinput = fullscreen ? true : false);
+            useddepthbits = gfx->getdepthbits();
+            usedfsaa = gfx->getsamples() > 1 ? gfx->getsamples() : 0;
+            hasstencil = false;
+            return;
+        }
+        conoutf("\f3SDL GPU renderer not available: using OpenGL");
+        if(screen) SDL_DestroyWindow(screen);
+        screen = NULL;
+        usegpu = false;
+    }
 
     static int configs[] =
     {
@@ -1744,6 +1766,7 @@ int main(int argc, char **argv)
                     {
                         initmode = atoi(&argv[i][11]);
                     }
+                    else if(!strcmp(argv[i], "--gpu")) usegpu = true; // SDL GPU renderer (Metal/Vulkan), work in progress
                     else if(!strncmp(argv[i], "--loaddemo=", 11))
                     {
                         initdemo = &argv[i][11];
@@ -2027,11 +2050,11 @@ int main(int argc, char **argv)
         if(frames>3 && !minimized)
         {
             gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
-            if(frames>4) SDL_GL_SwapWindow(screen);
+            if(frames>4) gfx->present();
             // "gpusync 1": wait for the GPU to finish the frame, so the driver can't queue frames ahead. Costs throughput
             // (CPU and GPU no longer overlap) but keeps input-to-display latency at one frame.
             extern int gpusync;
-            if(gpusync) glFinish();
+            if(gpusync) gfx->finish();
             rpmark(RP_SWAP);
         }
 
