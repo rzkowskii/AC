@@ -867,27 +867,63 @@ void resetgl()
 COMMAND(resetgl, "");
 
 VARFP(maxfps, 0, 200, 1000, if(maxfps && maxfps < 25) maxfps = 25);
+VARP(fpslimitspin, 0, 250, 2000); // microseconds at the end of each capped frame that are busy-waited instead of slept, to absorb OS timer jitter
 
-void limitfps(int &millis, int curmillis)
+// high-resolution clock: milliseconds with sub-millisecond precision, on the same epoch as SDL_GetTicks()
+double hrclockms()
 {
-    if(!maxfps) return;
-    static int fpserror = 0;
-    int delay = 1000/maxfps - (millis-curmillis);
-    if(delay < 0) fpserror = 0;
+    static Uint64 start = 0;
+    static double msperticks = 0, startms = 0;
+    Uint64 now = SDL_GetPerformanceCounter();
+    if(!start)
+    {
+        start = now;
+        startms = SDL_GetTicks();
+        msperticks = 1000.0 / double(SDL_GetPerformanceFrequency());
+    }
+    return startms + double(now - start) * msperticks;
+}
+
+#ifndef WIN32
+#include <sched.h>
+#endif
+
+// sleep for about "ms" milliseconds; sub-millisecond durations are honoured where the OS allows it
+static void precisesleep(double ms)
+{
+    if(ms <= 0) return;
+#ifdef WIN32
+    if(ms >= 1) SDL_Delay(Uint32(ms));
+#else
+    struct timespec ts;
+    ts.tv_sec = time_t(ms / 1000);
+    ts.tv_nsec = long((ms - ts.tv_sec * 1000.0) * 1e6);
+    nanosleep(&ts, NULL);
+#endif
+}
+
+// frame limiter: frames are started on a fixed grid of 1000/maxfps ms, measured with the high-resolution clock.
+// The old limiter slept whole milliseconds with SDL_Delay and assumed the sleep was exact, so rounding and OS oversleep
+// showed up as uneven frame times (and a lower than requested fps).
+void limitfps()
+{
+    static double nextframe = -1;
+    if(!maxfps) { nextframe = -1; return; }
+    const double period = 1000.0 / maxfps;
+    double now = hrclockms();
+    if(nextframe < 0 || now - nextframe > period) nextframe = now; // first frame, or more than one frame late: resync instead of rushing to catch up
     else
     {
-        fpserror += 1000%maxfps;
-        if(fpserror >= maxfps)
+        double spin = fpslimitspin / 1000.0;
+        if(nextframe - now > spin) precisesleep(nextframe - now - spin);
+        while(hrclockms() < nextframe)
         {
-            ++delay;
-            fpserror -= maxfps;
-        }
-        if(delay > 0)
-        {
-            SDL_Delay(delay);
-            millis += delay;
+#ifndef WIN32
+            sched_yield();
+#endif
         }
     }
+    nextframe += period;
 }
 
 int lowfps = 30, highfps = 40;
@@ -1187,8 +1223,9 @@ VARF(gamespeed, 10, 100, 1000, if(multiplayer()) gamespeed = 100);
 VARF(paused, 0, 0, 1, if(multiplayer()) paused = 0);
 
 bool inmainloop = false;
-static int clockrealbase = 0, clockvirtbase = 0;
-static void clockreset() { clockrealbase = SDL_GetTicks(); clockvirtbase = totalmillis; }
+static double clockrealbase = 0;
+static int clockvirtbase = 0;
+static void clockreset() { clockrealbase = hrclockms(); clockvirtbase = totalmillis; }
 VARFP(clockerror, 990000, 1000000, 1010000, clockreset());
 VARFP(clockfix, 0, 0, 1, clockreset());
 
@@ -1695,11 +1732,13 @@ int main(int argc, char **argv)
     {
         static int frames = 0;
         static float fps = 10.0f;
-        int millis = SDL_GetTicks() - clockrealbase;
-        if(clockfix) millis = int(millis*(double(clockerror)/1000000));
-        millis += clockvirtbase;
-        if(millis<totalmillis) millis = totalmillis;
-        limitfps(millis, totalmillis);
+        limitfps(); // wait for this frame's start first, then read the clock: the frame time is measured, not assumed
+        double framestart = hrclockms();
+        double realmillis = framestart - clockrealbase;
+        if(clockfix) realmillis *= double(clockerror)/1000000;
+        int millis = int(realmillis) + clockvirtbase;
+        float millisfrac = float(realmillis - floor(realmillis)); // sub-millisecond part, used for render interpolation
+        if(millis<totalmillis) { millis = totalmillis; millisfrac = 0; }
         int elapsed = millis-totalmillis;
         entropy_add_byte(elapsed);
         if(multiplayer(NULL))
@@ -1724,6 +1763,9 @@ int main(int argc, char **argv)
         }
         lastmillis += curtime;
         totalmillis = millis;
+        // game time only has the real clock's sub-millisecond phase when it advances 1:1 with real time
+        extern float lastmillisfrac;
+        lastmillisfrac = curtime == elapsed && !(multiplayer(NULL) ? ispaused : paused) ? millisfrac : 0;
 
         checkinput();
 

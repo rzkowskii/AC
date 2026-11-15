@@ -782,16 +782,18 @@ void moveplayer(physent *pl, int moveres, bool local, int curtime)
 const int PHYSFPS = 200;
 const int PHYSFRAMETIME = 1000 / PHYSFPS;
 int physsteps = 0, physframetime = PHYSFRAMETIME, lastphysframe = 0;
+float lastmillisfrac = 0; // sub-millisecond part of the current frame's game time (0 when game time isn't real time), set by the main loop
 
 void physicsframe()          // optimally schedule physics frames inside the graphics frames
 {
     int diff = lastmillis - lastphysframe;
-    if(diff <= 0) physsteps = 0;
+    // with a sub-millisecond clock, real time is already past lastphysframe when diff == 0 and the fraction is > 0
+    if(diff < 0 || (diff == 0 && lastmillisfrac <= 0)) physsteps = 0;
     else
     {
         extern int gamespeed;
         physframetime = clamp((PHYSFRAMETIME*gamespeed)/100, 1, PHYSFRAMETIME);
-        physsteps = (diff + physframetime - 1)/physframetime;
+        physsteps = max((diff + physframetime - 1)/physframetime, 1);
         lastphysframe += physsteps * physframetime;
         if(!multiplayer(NULL) && physsteps > 1000) physsteps = 1000;
     }
@@ -804,11 +806,13 @@ void interppos(physent *pl)
     pl->o = pl->newpos;
     pl->o.z += pl->eyeheight;
 
-    int diff = lastphysframe - lastmillis;
+    // interpolate with sub-millisecond precision: with whole milliseconds the camera only moves in 1 ms steps, which
+    // is visible as uneven motion at high refresh rates (at 240 Hz each frame advances either 4 or 5 ms)
+    float diff = float(lastphysframe - lastmillis) - lastmillisfrac;
     if(diff <= 0 || !physinterp) return;
 
     vec deltapos(pl->deltapos);
-    deltapos.mul(min(diff, physframetime)/float(physframetime));
+    deltapos.mul(min(diff, float(physframetime))/float(physframetime));
     pl->o.add(deltapos);
 }
 

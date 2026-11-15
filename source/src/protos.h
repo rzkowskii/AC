@@ -404,6 +404,7 @@ extern void framedquadtexture(GLuint tex, int x, int y, int xs, int ys, int bord
 extern void setperspective(float fovy, float aspect, float nearplane, float farplane);
 extern void sethudgunperspective(bool on);
 extern void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed);
+extern double hrclockms();
 extern void clearminimap();
 extern void resetzones();
 extern void rendercursor(int x, int y, int w);
