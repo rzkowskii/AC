@@ -1,0 +1,87 @@
+# Builds AssaultCube on Linux and macOS for every push and pull request:
+# - Linux: CMake and the Makefile (client, server, master), clang and g++
+# - Windows: the Visual Studio project (MSBuild)
+# - macOS: CMake against Homebrew, and the universal, self-contained AssaultCube.app (uploaded as an artifact)
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang, gcc]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config clang \
+            libsdl2-dev libsdl2-image-dev libopenal-dev libvorbis-dev zlib1g-dev libx11-dev libgl-dev
+      - name: CMake build
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
+          cmake -S source -B build -G Ninja
+          cmake --build build
+      - name: Smoke test
+        run: build/ac_client --home="$RUNNER_TEMP/achome" --version
+      - name: Makefile build
+        run: |
+          if [ "${{ matrix.compiler }}" = clang ]; then CXX=clang++; else CXX=g++; fi
+          make -C source/src -j"$(nproc)" CXX=$CXX client server master
+
+  windows:
+    # the Visual Studio project (32-bit), as the Windows releases are built; the runner's Visual Studio 2022 builds it
+    # with its own toolset instead of the project's (2019)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build the client and the server
+        run: |
+          msbuild source\vcpp\assaultcube.sln /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143
+          msbuild source\vcpp\assaultcube.sln /m /p:Configuration=Standalone /p:Platform=Win32 /p:PlatformToolset=v143
+      - name: OpenAL (players get it from the installer; here the bundled OpenAL Soft, as bin_win32/readme_OpenAL.txt says)
+        shell: bash
+        run: cp bin_win32/openal32_RemoveThisPartToUseOpenAL-Soft.dll bin_win32/OpenAL32.dll
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          # (a Windows GUI program: piping its output makes PowerShell wait for it)
+          $v = & bin_win32\ac_client.exe --home="$env:RUNNER_TEMP\achome" --version | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output "client version: $v"
+          if (-not (Test-Path bin_win32\ac_server.exe)) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AssaultCube-Windows
+          path: |
+            bin_win32/*.exe
+            bin_win32/*.dll
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install sdl2-compat sdl2_image libvorbis
+      - name: CMake build (Homebrew libraries)
+        run: |
+          cmake -S source -B build
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+          build/ac_client --home="$RUNNER_TEMP/achome" --version
+      - name: Universal app bundle
+        run: source/macos/make-app.sh --dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AssaultCube-macOS
+          path: source/macos/build/AssaultCube-*-macOS.dmg
+          if-no-files-found: error

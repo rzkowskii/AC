@@ -164,6 +164,7 @@
 			<Add alias="All" targets="default;server;" />
 		</VirtualTargets>
 		<Compiler>
+			<Add option="-std=gnu++17" />
 			<Add directory="../enet/include" />
 			<Add directory="../include" />
 			<Add directory="../src" />

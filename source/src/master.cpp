@@ -1,4 +1,6 @@
 #include "cube.h"
+
+bool isdedicated = true; // used by shared helpers in protocol.cpp and tools.cpp (defined in server.cpp for the game server)
 #include <signal.h>
 #include <enet/time.h>
 

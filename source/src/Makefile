@@ -215,6 +215,8 @@ SERVER_OBJS= \
 MASTER_OBJS= \
 	stream-standalone.o \
 	command-standalone.o \
+	tools-standalone.o \
+	protocol-standalone.o \
 	master-standalone.o
 
 ifeq ($(PLATFORM),SunOS)
