@@ -27,7 +27,6 @@
 		665CDD160AFE7ED80030D605 /* bot_waypoint.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 665CDCE40AFE7ED80030D605 /* bot_waypoint.cpp */; };
 		665CDD180AFE7ED80030D605 /* botmanager.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 665CDCE60AFE7ED80030D605 /* botmanager.cpp */; };
 		66899E700C1485E200927C34 /* ConsoleView.m in Sources */ = {isa = PBXBuildFile; fileRef = 66899E6E0C1485E200927C34 /* ConsoleView.m */; };
-		66899E770C14862300927C34 /* macutils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 66899E760C14862300927C34 /* macutils.mm */; };
 		9E595539121EA8E9005ED5F7 /* crypto.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9E595536121EA8E9005ED5F7 /* crypto.cpp */; };
 		9EAE4C10120F2F370041E6E4 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 9EAE4BD8120F2D0A0041E6E4 /* Localizable.strings */; };
 		9EB8171C11ED9AEF00799589 /* Ogg.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9EB8171411ED9AEF00799589 /* Ogg.framework */; };
@@ -147,7 +146,6 @@
 		665CDCE60AFE7ED80030D605 /* botmanager.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; path = botmanager.cpp; sourceTree = "<group>"; };
 		66899E6D0C1485E200927C34 /* ConsoleView.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; path = ConsoleView.h; sourceTree = "<group>"; };
 		66899E6E0C1485E200927C34 /* ConsoleView.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; path = ConsoleView.m; sourceTree = "<group>"; };
-		66899E760C14862300927C34 /* macutils.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; path = macutils.mm; sourceTree = "<group>"; };
 		66899EA80C14887F00927C34 /* Help.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; path = Help.tiff; sourceTree = "<group>"; };
 		66899EA90C14887F00927C34 /* Keys.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = Keys.gif; sourceTree = "<group>"; };
 		66899EAA0C14887F00927C34 /* Main.gif */ = {isa = PBXFileReference; lastKnownFileType = image.gif; path = Main.gif; sourceTree = "<group>"; };
@@ -277,7 +275,6 @@
 			isa = PBXGroup;
 			children = (
 				B96D0D6C0920976E00B6C936 /* main.m */,
-				66899E760C14862300927C34 /* macutils.mm */,
 				66899E6D0C1485E200927C34 /* ConsoleView.h */,
 				66899E6E0C1485E200927C34 /* ConsoleView.m */,
 				B96D0D570920970C00B6C936 /* Launcher.h */,
@@ -620,7 +617,6 @@
 				665CDD140AFE7ED80030D605 /* bot_util.cpp in Sources */,
 				665CDD160AFE7ED80030D605 /* bot_waypoint.cpp in Sources */,
 				665CDD180AFE7ED80030D605 /* botmanager.cpp in Sources */,
-				66899E770C14862300927C34 /* macutils.mm in Sources */,
 				B914CE8E11CAC42F009BA307 /* audiomanager.cpp in Sources */,
 				B914CE8F11CAC42F009BA307 /* client.cpp in Sources */,
 				B914CE9011CAC42F009BA307 /* clientgame.cpp in Sources */,

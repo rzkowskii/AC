@@ -122,6 +122,21 @@ VARNP(relativemouse, userelativemouse, 0, 1, 1);
 
 static bool shouldgrab = false, grabinput = false, minimized = false, centerwindow = true, canrelativemouse = true, relativemouse = false;
 
+#ifdef __APPLE__
+// Relative mouse mode on macOS: "macmousewarp 1" (default) has SDL compute mouse motion by warping the cursor, the fix for
+// https://github.com/assaultcube/AC/issues/300 (with SDL 2.0.14, clicking could freeze the game in relative mode).
+// Warp mode follows macOS's pointer acceleration; "macmousewarp 0" uses SDL's raw relative mouse mode instead, which
+// current SDL versions may well handle correctly - it takes effect immediately, so it can be tried out in game.
+void inputgrab(bool on, bool delay);
+static void applymacmousewarp();
+VARFP(macmousewarp, 0, 1, 1, applymacmousewarp());
+static void applymacmousewarp()
+{
+    SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, macmousewarp ? "1" : "0", SDL_HINT_OVERRIDE);
+    if(relativemouse) { inputgrab(false, false); inputgrab(true, false); } // re-enter relative mode with the new setting
+}
+#endif
+
 #ifdef SDL_VIDEO_DRIVER_X11
 VAR(sdl_xgrab_bug, 0, 0, 1);
 #endif
@@ -1808,8 +1823,7 @@ int main(int argc, char **argv)
 #endif
 
 #ifdef __APPLE__
-    // Fix https://github.com/assaultcube/AC/issues/300
-    SDL_SetHintWithPriority(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "1", SDL_HINT_OVERRIDE);
+    applymacmousewarp();
 #endif
 
     SDL_ShowCursor(SDL_FALSE);
