@@ -408,6 +408,8 @@ public:
 
     // init & setup
     void initsound();
+    void applyhrtf();   // apply the "hrtf" setting to the open device
+    void reporthrtf();  // print whether HRTF is in use, and why
     bool preloadmapsound(entity &e, bool trydl = false);
     bool preloadmapsounds(bool trydl = false);
     void applymapsoundchanges();

@@ -149,10 +149,13 @@ bool source::position(const vec &pos)
     return position(pos.x, pos.y, pos.z);
 }
 
+// OpenAL's coordinate system is right-handed, the cube world's is left-handed: z is mirrored for everything handed to
+// OpenAL (positions, velocities, and the listener in audiomanager::updateaudio), so that left/right *and* up/down come
+// out right - HRTF renders elevation cues, which plain stereo panning ignores.
 bool source::position(float x, float y, float z)
 {
     alclearerr();
-    alSource3f(id, AL_POSITION, x, y, z);
+    alSource3f(id, AL_POSITION, x, y, -z);
     if(x < 0 || y < 0 || z < -128 || x > ssize || y > ssize || z > 128) clientlogf("warning: sound position out of range (%f,%f,%f)", x, y, z);
     return !ALERRF("id %u, %d, x: %f, y: %f, z: %f", id, alIsSource(id) == AL_TRUE ? 1 : 0,  x, y, z);
 //    return !ALERRF("x: %f, y: %f, z: %f", x, y, z);   // when sound bug has been absent for a while, switch to this version
@@ -161,7 +164,7 @@ bool source::position(float x, float y, float z)
 bool source::velocity(float x, float y, float z)
 {
     alclearerr();
-    alSource3f(id, AL_VELOCITY, x, y, z);
+    alSource3f(id, AL_VELOCITY, x, y, -z); // z mirrored, see source::position()
     return !ALERRF("dx: %f, dy: %f, dz: %f", x, y, z);
 }
 
@@ -171,7 +174,7 @@ vec source::position()
     ALfloat v[3];
     alGetSourcefv(id, AL_POSITION, v);
     if(ALERR) return vec(0,0,0);
-    else return vec(v[0], v[1], v[2]);
+    else return vec(v[0], v[1], -v[2]); // back to world coordinates, see source::position()
 }
 
 bool source::sourcerelative(bool enable)

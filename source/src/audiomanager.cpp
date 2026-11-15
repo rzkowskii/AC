@@ -10,6 +10,79 @@ char *musicdonecmd = NULL;
 
 VARFP(musicvol, 0, 128, 255, audiomgr.setmusicvol(musicvol));
 
+// HRTF (head-related transfer functions): binaural 3D audio for headphones, so sounds can be placed in front/behind and
+// above/below, not just left/right. Provided by OpenAL Soft (the ALC_SOFT_HRTF extension).
+// -1: automatic (OpenAL Soft turns it on when it detects headphones), 0: off, 1: on (for headphones it can't detect,
+// such as Bluetooth and USB headsets). Don't use it with speakers.
+VARFP(hrtf, -1, -1, 1, audiomgr.applyhrtf());
+VAR(hrtfactive, 1, 0, 0); // read-only: 1 while HRTF is in use
+static int hrtfapplied = -2;
+
+// ALC_SOFT_HRTF constants (from OpenAL Soft's alext.h), defined here so this also builds against OpenAL headers
+// without them (Apple's framework, older headers). Whether the extension is available is checked at runtime.
+#ifndef ALC_HRTF_SOFT
+#define ALC_HRTF_SOFT                       0x1992
+#define ALC_DONT_CARE_SOFT                  0x0002
+#define ALC_HRTF_STATUS_SOFT                0x1993
+#define ALC_HRTF_DISABLED_SOFT              0x0000
+#define ALC_HRTF_ENABLED_SOFT               0x0001
+#define ALC_HRTF_DENIED_SOFT                0x0002
+#define ALC_HRTF_REQUIRED_SOFT              0x0003
+#define ALC_HRTF_HEADPHONES_DETECTED_SOFT   0x0004
+#define ALC_HRTF_UNSUPPORTED_FORMAT_SOFT    0x0005
+#define ALC_HRTF_SPECIFIER_SOFT             0x1995
+#endif
+typedef ALCboolean (ALC_APIENTRY *ac_alcresetdevicesoft)(ALCdevice *device, const ALCint *attribs);
+
+static bool hashrtf(ALCdevice *device) { return device && alcIsExtensionPresent(device, "ALC_SOFT_HRTF") == ALC_TRUE; }
+
+// context/device attributes for the current "hrtf" setting (an empty list without HRTF support)
+static const ALCint *hrtfattribs(ALCdevice *device)
+{
+    static ALCint attribs[3];
+    attribs[0] = 0;
+    if(hashrtf(device))
+    {
+        attribs[0] = ALC_HRTF_SOFT;
+        attribs[1] = hrtf < 0 ? ALC_DONT_CARE_SOFT : (hrtf ? ALC_TRUE : ALC_FALSE);
+        attribs[2] = 0;
+    }
+    return attribs;
+}
+
+void audiomanager::reporthrtf()
+{
+    hrtfactive = 0;
+    if(!device) return;
+    if(!hashrtf(device)) { conoutf("HRTF: not supported by this OpenAL implementation"); return; }
+    ALCint enabled = ALC_FALSE, status = ALC_HRTF_DISABLED_SOFT;
+    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &enabled);
+    alcGetIntegerv(device, ALC_HRTF_STATUS_SOFT, 1, &status);
+    hrtfactive = enabled == ALC_TRUE ? 1 : 0;
+    const char *why;
+    switch(status)
+    {
+        case ALC_HRTF_ENABLED_SOFT:             why = "on"; break;
+        case ALC_HRTF_HEADPHONES_DETECTED_SOFT: why = "automatic: headphones detected"; break;
+        case ALC_HRTF_REQUIRED_SOFT:            why = "required by the OpenAL configuration"; break;
+        case ALC_HRTF_DENIED_SOFT:              why = "denied by the OpenAL configuration"; break;
+        case ALC_HRTF_UNSUPPORTED_FORMAT_SOFT:  why = "the audio output isn't stereo"; break;
+        default:                                why = hrtf < 0 ? "automatic: no headphones detected, use 'hrtf 1' to force it on" : "off"; break;
+    }
+    if(hrtfactive) conoutf("HRTF: enabled, %s (%s)", alcGetString(device, ALC_HRTF_SPECIFIER_SOFT), why);
+    else conoutf("HRTF: disabled (%s)", why);
+}
+
+void audiomanager::applyhrtf()
+{
+    if(nosound || !device || hrtf == hrtfapplied) return; // initsound() applies the setting when the device is opened
+    hrtfapplied = hrtf;
+    ac_alcresetdevicesoft resetdevice = hashrtf(device) ? (ac_alcresetdevicesoft) alcGetProcAddress(device, "alcResetDeviceSOFT") : NULL;
+    if(!resetdevice) { reporthrtf(); return; }
+    if(!resetdevice(device, hrtfattribs(device))) conoutf("HRTF: could not reset the audio device: %s", alcGetString(device, alcGetError(device)));
+    reporthrtf();
+}
+
 // audio manager
 
 audiomanager::audiomanager()
@@ -57,7 +130,7 @@ void audiomanager::initsound()
 
     if(device)
     {
-        context = alcCreateContext(device, NULL);
+        context = alcCreateContext(device, hrtfattribs(device));
         if(context)
         {
             alcMakeContextCurrent(context);
@@ -67,6 +140,8 @@ void audiomanager::initsound()
             // backend infos
             conoutf("Sound: %s / %s (%s)", alcGetString(device, ALC_DEVICE_SPECIFIER), alGetString(AL_RENDERER), alGetString(AL_VENDOR));
             conoutf("Driver: %s", alGetString(AL_VERSION));
+            hrtfapplied = hrtf;
+            reporthrtf();
 
             // allocate OpenAL resources
             sourcescheduler::instance().init(16);
@@ -674,15 +749,17 @@ void audiomanager::updateaudio()
         }
     }
 
-    // listener
-    vec o[2];
-    o[0].x = (float)(cosf(RAD*(camera1->yaw-90)));
-    o[0].y = (float)(sinf(RAD*(camera1->yaw-90)));
-    o[0].z = 0.0f;
-    o[1].x = o[1].y = 0.0f;
-    o[1].z = -1.0f;
-    alListenerfv(AL_ORIENTATION, (ALfloat *) &o);
-    alListenerfv(AL_POSITION, (ALfloat *) &camera1->o);
+    // listener: z is mirrored for OpenAL (see source::position() in openal.cpp), so "up" is -z. The orientation includes
+    // the view pitch, so with HRTF, sounds stay where they are in the world when looking up or down. At pitch 0 these
+    // are the same vectors as before (forward = view direction, up = (0,0,-1)), so stereo panning is unchanged.
+    const float yaw = RAD*(camera1->yaw-90), pitch = RAD*camera1->pitch;
+    const ALfloat o[6] =
+    {
+        cosf(pitch)*cosf(yaw),   cosf(pitch)*sinf(yaw),  -sinf(pitch), // forward
+        -sinf(pitch)*cosf(yaw), -sinf(pitch)*sinf(yaw),  -cosf(pitch)  // up
+    };
+    alListenerfv(AL_ORIENTATION, o);
+    alListener3f(AL_POSITION, camera1->o.x, camera1->o.y, -camera1->o.z);
 
     alcProcessContext(context);
 }
