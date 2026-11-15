@@ -45,6 +45,7 @@ PFNGLBINDRENDERBUFFEREXTPROC        glBindRenderbuffer_        = NULL;
 PFNGLRENDERBUFFERSTORAGEEXTPROC     glRenderbufferStorage_     = NULL;
 PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC glFramebufferRenderbuffer_ = NULL;
 PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC  glCheckFramebufferStatus_  = NULL;
+PFNGLFRAMEBUFFERTEXTURE2DEXTPROC    glFramebufferTexture2D_    = NULL;
 bool hasDBF = false; // GL_ARB_depth_buffer_float
 
 void *getprocaddress(const char *name)
@@ -156,8 +157,10 @@ void gl_checkextensions()
         glRenderbufferStorage_     = (PFNGLRENDERBUFFERSTORAGEEXTPROC)    getprocaddress("glRenderbufferStorageEXT");
         glFramebufferRenderbuffer_ = (PFNGLFRAMEBUFFERRENDERBUFFEREXTPROC)getprocaddress("glFramebufferRenderbufferEXT");
         glCheckFramebufferStatus_  = (PFNGLCHECKFRAMEBUFFERSTATUSEXTPROC) getprocaddress("glCheckFramebufferStatusEXT");
+        glFramebufferTexture2D_    = (PFNGLFRAMEBUFFERTEXTURE2DEXTPROC)   getprocaddress("glFramebufferTexture2DEXT");
         hasFBO = glGenFramebuffers_ && glDeleteFramebuffers_ && glBindFramebuffer_ && glGenRenderbuffers_ && glDeleteRenderbuffers_ &&
-                 glBindRenderbuffer_ && glRenderbufferStorage_ && glFramebufferRenderbuffer_ && glCheckFramebufferStatus_;
+                 glBindRenderbuffer_ && glRenderbufferStorage_ && glFramebufferRenderbuffer_ && glCheckFramebufferStatus_ &&
+                 glFramebufferTexture2D_;
     }
     hasDBF = hasext(exts, "GL_ARB_depth_buffer_float");
 
@@ -192,6 +195,12 @@ void gl_checkextensions()
 }
 
 static int scenedepthbits = 24; // precision of the main depth buffer, mirrored by the crosshair pick buffer
+extern bool hasDBF;
+#ifndef GL_DEPTH_COMPONENT32F
+#define GL_DEPTH_COMPONENT32F 0x8CAC
+#endif
+// depth renderbuffer format matching the main depth buffer (offscreen passes then resolve depth exactly like it)
+int scenedepthformat() { return scenedepthbits >= 32 ? (hasDBF ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT32) : GL_DEPTH_COMPONENT24; }
 
 void gl_init(int w, int h, int depth, int fsaa)
 {
@@ -712,12 +721,59 @@ VARP(waterreflect, 0, 1, 1);
 VARP(waterrefract, 0, 0, 1);
 VAR(reflectscissor, 0, 1, 1);
 
+// "reflectfbo 1" renders the water reflection and refraction straight into their textures through framebuffer objects
+// instead of into the back buffer followed by a copy; their size then isn't limited by the window size either.
+// It's off by default: on Apple's OpenGL-on-Metal it measured 5-10% slower than the copy (M4 Max, ac_aqueous), and
+// elsewhere the 256x256 copy it saves is negligible. Kept for the offscreen rendering a Metal/Vulkan backend needs.
+VAR(reflectfbo, 0, 0, 1);
+static GLuint reflectfbos[2] = { 0, 0 }, reflectdepthrb = 0;
+
+static void cleanupreflectfbos()
+{
+    loopi(2) if(reflectfbos[i]) { glDeleteFramebuffers_(1, &reflectfbos[i]); reflectfbos[i] = 0; }
+    if(reflectdepthrb) { glDeleteRenderbuffers_(1, &reflectdepthrb); reflectdepthrb = 0; }
+}
+
+static bool bindreflectfbo(int size, bool refract) // false: render into the back buffer and copy, as before
+{
+    if(!hasFBO || !reflectfbo) return false;
+    GLuint &fbo = reflectfbos[refract ? 1 : 0];
+    if(!fbo)
+    {
+        if(!reflectdepthrb)
+        {
+            // same depth precision as the back buffer the reflection used to be rendered into
+            extern int scenedepthformat();
+            glGenRenderbuffers_(1, &reflectdepthrb);
+            glBindRenderbuffer_(GL_RENDERBUFFER_EXT, reflectdepthrb);
+            glRenderbufferStorage_(GL_RENDERBUFFER_EXT, scenedepthformat(), size, size);
+            glBindRenderbuffer_(GL_RENDERBUFFER_EXT, 0);
+        }
+        glGenFramebuffers_(1, &fbo);
+        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, fbo);
+        glFramebufferTexture2D_(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_2D, refract ? refracttex : reflecttex, 0);
+        glFramebufferRenderbuffer_(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, reflectdepthrb);
+        GLenum status = glCheckFramebufferStatus_(GL_FRAMEBUFFER_EXT);
+        if(status != GL_FRAMEBUFFER_COMPLETE_EXT)
+        {
+            glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
+            cleanupreflectfbos();
+            reflectfbo = 0;
+            conoutf("water reflection framebuffer not supported (0x%X): rendering into the back buffer instead", status);
+            return false;
+        }
+        return true;
+    }
+    glBindFramebuffer_(GL_FRAMEBUFFER_EXT, fbo);
+    return true;
+}
+
 void drawreflection(float hf, int w, int h, float changelod, bool refract)
 {
     reflecting = true;
     refracting = refract;
 
-    int size = 1<<reflectsize, sizelimit = min(hwtexsize, min(w, h));
+    int size = 1<<reflectsize, sizelimit = hasFBO && reflectfbo ? hwtexsize : min(hwtexsize, min(w, h));
     while(size > sizelimit) size /= 2;
     if(size!=reflectlastsize)
     {
@@ -727,15 +783,19 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
     }
     if(!reflecttex || (waterrefract && !refracttex))
     {
+        cleanupreflectfbos(); // (re)attached to the new textures on first use
+        // RGBA when rendered through a framebuffer: GPUs (Metal in particular) have no 8 bit RGB render target format,
+        // so drivers would have to emulate rendering into an RGB texture
+        GLenum format = hasFBO && reflectfbo ? GL_RGBA : GL_RGB;
         if(!reflecttex)
         {
             glGenTextures(1, &reflecttex);
-            createtexture(reflecttex, size, size, NULL, 3, false, false, GL_RGB);
+            createtexture(reflecttex, size, size, NULL, 3, false, false, format);
         }
         if(!refracttex)
         {
             glGenTextures(1, &refracttex);
-            createtexture(refracttex, size, size, NULL, 3, false, false, GL_RGB);
+            createtexture(refracttex, size, size, NULL, 3, false, false, format);
         }
         reflectlastsize = size;
     }
@@ -749,6 +809,7 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
         sw = int(ceil((wsx2+1)*0.5f*size)) - sx;
         sh = int(ceil((wsy2+1)*0.5f*size)) - sy;
     }
+    bool usefbo = bindreflectfbo(size, refract);
     glScissor(sx, sy, sw, sh);
     glEnable(GL_SCISSOR_TEST);
 
@@ -837,8 +898,12 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
 
     glDisable(GL_SCISSOR_TEST);
 
-    glBindTexture(GL_TEXTURE_2D, refract ? refracttex : reflecttex);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, sx, sy, sx, sy, sw, sh);
+    if(usefbo) glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, refract ? refracttex : reflecttex);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, sx, sy, sx, sy, sw, sh);
+    }
 
     glDisable(GL_TEXTURE_2D);
 
@@ -973,6 +1038,7 @@ void cleanupgl()
     if(refracttex) glDeleteTextures(1, &refracttex);
     if(minimaptex) glDeleteTextures(1, &minimaptex);
     reflecttex = refracttex = minimaptex = 0;
+    cleanupreflectfbos();
     minimapdirty = true;
     cleanupdepthread();
 }
@@ -1401,7 +1467,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     rpmark(RP_DEPTHPICK);
 
     if(effective_stencilshadow && hasstencil && stencilbits >= 8) glClearStencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
-    glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
+glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
 
     setupstrips();
 
