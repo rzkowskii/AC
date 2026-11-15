@@ -56,3 +56,8 @@ server_autoconfigured.bat
 # macOS app bundle build (source/macos/make-app.sh)
 source/macos/deps/
 source/macos/build/
+
+# profile-guided optimisation data (source/dev_tools/pgo-build.sh)
+source/src/pgo/
+source/src/*.profraw
+source/src/*.profdata

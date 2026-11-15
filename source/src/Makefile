@@ -38,10 +38,42 @@ ifneq (,$(findstring clang,$(CXX)))
 	override CXXFLAGS+= -Wall -fsigned-char
 else
 	CXXFLAGS= -O3 -fomit-frame-pointer
-	override CXXFLAGS+= -Wall -fsigned-char -ffast-math -rdynamic -Wno-format-zero-length
+	# (no -ffast-math: physics is predicted on every client, so all builds should round the same way, clang or g++)
+	override CXXFLAGS+= -Wall -fsigned-char -rdynamic -Wno-format-zero-length
 	ifeq "$(shell expr $$($(CXX) -dumpversion | cut -d. -f1) \>= 8)" "1"
 		override CXXFLAGS+= -Wno-stringop-truncation
 	endif
+endif
+
+# Optional optimisations (the defaults are unchanged):
+#   LTO=1                link-time optimisation (ThinLTO with clang)
+#   PGO=generate         build instrumented binaries; play or run "benchmark" to record a profile, then
+#   PGO=use              build with the merged profile in PGOPROFILE (default: ac.profdata; source/dev_tools/pgo-build.sh does all of it)
+#   MARCH=x86-64-v3      tune for a CPU baseline (e.g. x86-64-v2/-v3 for Linux packages, native for your own machine)
+ifdef LTO
+ifneq (,$(findstring clang,$(CXX)))
+override CXXFLAGS+= -flto=thin
+else
+override CXXFLAGS+= -flto=auto
+endif
+endif
+PGOPROFILE?= ac.profdata
+ifeq ($(PGO),generate)
+ifneq (,$(findstring clang,$(CXX)))
+override CXXFLAGS+= -fprofile-instr-generate
+else
+override CXXFLAGS+= -fprofile-generate
+endif
+endif
+ifeq ($(PGO),use)
+ifneq (,$(findstring clang,$(CXX)))
+override CXXFLAGS+= -fprofile-instr-use=$(PGOPROFILE) -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled
+else
+override CXXFLAGS+= -fprofile-use -fprofile-correction
+endif
+endif
+ifdef MARCH
+override CXXFLAGS+= -march=$(MARCH)
 endif
 
 INCLUDES= -I. -Ibot -I../enet/include
@@ -79,6 +111,14 @@ endif
 ifdef MACOS_ARCH
 override CXXFLAGS+= -arch $(MACOS_ARCH)
 ENET_CFLAGS+= -arch $(MACOS_ARCH)
+# CPU baseline of each slice: every Apple Silicon Mac (M1 and later); every Intel Mac that runs macOS 11
+# (the 2013 Mac Pro's Ivy Bridge has no AVX2, so x86-64-v2 rather than v3)
+ifeq ($(MACOS_ARCH),arm64)
+override CXXFLAGS+= -mcpu=apple-m1
+endif
+ifeq ($(MACOS_ARCH),x86_64)
+override CXXFLAGS+= -march=x86-64-v2
+endif
 endif
 CLIENT_INCLUDES= $(INCLUDES) `$(SDL2_CONFIG) --cflags` $(MACOS_DEPS_INCLUDES) -idirafter ../include
 CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) -lSDL2_image $(SDL2_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
