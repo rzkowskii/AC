@@ -158,6 +158,7 @@ void inputgrab(bool on, bool delay = false)
             }
             else
             {
+                conoutf("\f3relative mouse mode is not available (%s): using absolute mouse positions", SDL_GetError());
                 SDL_SetWindowGrab(screen, SDL_FALSE);
                 canrelativemouse = false;
                 relativemouse = false;
@@ -1819,6 +1820,7 @@ int main(int argc, char **argv)
 
     initlog("video: sdl");
     if(SDL_InitSubSystem(SDL_INIT_VIDEO)<0) fatal("Unable to initialize SDL Video");
+    if(SDL_GetCurrentVideoDriver()) conoutf("video driver: %s", SDL_GetCurrentVideoDriver()); // e.g. x11, wayland, cocoa
 
     initlog("video: mode");
     int useddepthbits = 0, usedfsaa = 0;
