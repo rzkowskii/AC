@@ -71,7 +71,7 @@ VARFP(maxtexsize, 0, 0, 1<<12, initwarning("texture quality", INIT_LOAD));
 VARFP(texreduce, -1, 0, 3, initwarning("texture quality", INIT_LOAD));
 VARFP(trilinear, 0, 1, 1, initwarning("texture filtering", INIT_LOAD));
 VARFP(bilinear, 0, 1, 1, initwarning("texture filtering", INIT_LOAD));
-VARFP(aniso, 0, 0, 16, initwarning("texture filtering", INIT_LOAD));
+VARFP(aniso, 0, 8, 16, initwarning("texture filtering", INIT_LOAD)); // clamped to hwmaxaniso; practically free on any GPU from the last 15 years
 
 int formatsize(GLenum format)
 {

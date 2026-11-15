@@ -106,6 +106,9 @@ VARF(depthbits, 0, 0, 32, initwarning("depth-buffer precision"));
 VARF(stencilbits, 0, 0, 32, initwarning("stencil-buffer precision"));
 VARF(fsaa, -1, -1, 16, initwarning("anti-aliasing"));
 VARF(vsync, -1, -1, 1, initwarning("vertical sync"));
+VARF(highdpi, 0, 1, 1, initwarning("high-DPI rendering")); // render at native pixel resolution on Retina/HiDPI displays instead of being upscaled
+
+static int windoww = 0, windowh = 0; // window size in screen coordinates (points); screenw/screenh are the drawable size in pixels
 
 VAR(desktopw, 1, 0, 0); // resolution of desktop (assumed to be maximum resolution)
 VAR(desktoph, 1, 0, 0);
@@ -218,6 +221,7 @@ void writeinitcfg()
     f->printf("stencilbits %d\n", stencilbits);
     f->printf("fsaa %d\n", fsaa);
     f->printf("vsync %d\n", vsync);
+    f->printf("highdpi %d\n", highdpi);
     extern int audio, soundchannels, igraphdefaultframetime;
     f->printf("audio %d\n", audio > 0 ? 1 : 0);
     f->printf("soundchannels %d\n", soundchannels);
@@ -631,10 +635,18 @@ COMMAND(prepidenticon, "s");
 
 void updatescreensize()
 {
-    SDL_GetWindowSize(screen, &screenw, &screenh);
+    SDL_GetWindowSize(screen, &windoww, &windowh);
+    // on HiDPI displays the GL drawable is larger than the window (e.g. 2x on Retina): render at the drawable size
+    SDL_GL_GetDrawableSize(screen, &screenw, &screenh);
+    if(screenw < 1 || screenh < 1) { screenw = windoww; screenh = windowh; }
+    if(screenw < 1) screenw = 1;
     if(screenh < 1) screenh = 1;
     VIRTW = screenw * VIRTH / screenh;
     glViewport(0, 0, screenw, screenh);
+    static int lastw = 0, lasth = 0;
+    if((screenw != lastw || screenh != lasth) && (screenw != windoww || screenh != windowh))
+        conoutf("high-DPI rendering: %dx%d pixels in a %dx%d window", screenw, screenh, windoww, windowh);
+    lastw = screenw; lasth = screenh;
 }
 
 void screenres(int w, int h)
@@ -733,6 +745,7 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
     int winh = fullscreen && fullscreendesktop ? desktoph : scr_h;
 
     int flags = SDL_WINDOW_RESIZABLE;
+    if(highdpi) flags |= SDL_WINDOW_ALLOW_HIGHDPI;
     if(fullscreen) flags |= fullscreendesktop ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
 
     static int configs[] =
@@ -743,8 +756,10 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
         0 /* try disabling everything */
     };
     int config = 0;
+    // depthbits 0 means "auto": ask for a 24 bit z-buffer (supported by every GPU of the last two decades) and
+    // fall back to 16 bit. 16 bit depth causes z-fighting on distant geometry and decals.
+    const int wantdepthbits = depthbits ? depthbits : 24;
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
-    if(!depthbits) SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
     if(!fsaa)
     {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
@@ -753,10 +768,9 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
     loopi(sizeof(configs)/sizeof(configs[0]))
     {
         config = configs[i];
-        if(!depthbits && config&1) continue;
         if(!stencilbits && config&2) continue;
         if(fsaa<=0 && config&4) continue;
-        if(depthbits) SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, config&1 ? depthbits : 16);
+        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, config&1 ? wantdepthbits : 16);
         if(stencilbits)
         {
             SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, config&2 ? stencilbits : 0);
@@ -794,7 +808,10 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
 
     inputgrab(grabinput = fullscreen ? true : false);
 
-    useddepthbits = config&1 ? depthbits : 0;
+    useddepthbits = config&1 ? wantdepthbits : 16;
+    int gotdepthbits = 0;
+    if(!SDL_GL_GetAttribute(SDL_GL_DEPTH_SIZE, &gotdepthbits) && gotdepthbits > 0) useddepthbits = gotdepthbits;
+    conoutf("z-buffer: %d bit", useddepthbits);
     usedfsaa = config&4 ? fsaa : 0; // bit 2 is multisampling (bit 1 is stencil)
 }
 
@@ -940,7 +957,7 @@ static void resetmousemotion()
 {
     if (grabinput && !relativemouse && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN))
     {
-        SDL_WarpMouseInWindow(screen, screenw / 2, screenh / 2);
+        SDL_WarpMouseInWindow(screen, windoww / 2, windowh / 2); // window coordinates, not drawable pixels
     }
 }
 
@@ -949,7 +966,7 @@ static inline bool skipmousemotion(SDL_Event &event)
     if(event.type != SDL_MOUSEMOTION) return true;
     if(!(SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN))
     {
-        if(event.motion.x == screenw / 2 && event.motion.y == screenh / 2) return true;  // ignore any motion events generated SDL_WarpMouse
+        if(event.motion.x == windoww / 2 && event.motion.y == windowh / 2) return true;  // ignore any motion events generated SDL_WarpMouse
     }
     return false;
 }
