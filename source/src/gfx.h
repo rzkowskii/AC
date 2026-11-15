@@ -7,8 +7,9 @@
 //   first and draw each target in a single render pass.
 //
 // The vocabulary is the fixed-function GL the game is written in (GL enums for primitives, state and formats), so call
-// sites port one to one. Parts of the renderer that aren't ported yet still call GL directly and only run with the GL
-// backend (see gfx_legacygl()).
+// sites port one to one. The few things that only exist with GL (display lists, shaders.cpp's GLSL programs,
+// framebuffer objects for the water reflection, asynchronous depth reads, extension queries) still call GL directly,
+// behind gfx_legacygl().
 
 #ifndef GFX_H
 #define GFX_H
@@ -67,6 +68,7 @@ struct gfxdevice
     virtual void alphafunc(GLenum func, GLfloat ref) = 0;
     virtual void polygonoffset(GLfloat factor, GLfloat units) = 0;
     virtual void linewidth(GLfloat w) = 0;
+    virtual void polygonmode(GLenum face, GLenum mode) = 0;    // GL_FILL or GL_LINE (the editor's wireframe cursor)
     virtual void color3f(GLfloat r, GLfloat g, GLfloat b) = 0;
     virtual void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) = 0;
     virtual void color3ub(GLubyte r, GLubyte g, GLubyte b) = 0;
@@ -100,6 +102,7 @@ struct gfxdevice
     virtual void teximage2d(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border, GLenum format, GLenum type, const void *pixels) = 0;
     virtual void texsubimage2d(GLenum target, GLint level, GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, const void *pixels) = 0;
     virtual void copytexsubimage2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei w, GLsizei h) = 0; // from the frame
+    virtual void gettexture(GLuint t, GLenum format, void *pixels) = 0; // level 0 as unsigned bytes, GL_RGB or GL_RGBA, like glGetTexImage
 
     // --- buffer objects (GL_ARRAY_BUFFER_ARB, GL_ELEMENT_ARRAY_BUFFER_ARB)
     virtual void genbuffers(GLsizei n, GLuint *b) = 0;
@@ -132,7 +135,7 @@ struct gfxdevice
     // --- crosshair pick pass (rendergl.cpp, renderdepthpick()) and depth reads
     virtual bool beginpick(int depthbits) = 0;                 // binds the 1x1 pick target (depth cleared, colour writes off)
     virtual void endpick(bool async) = 0;                       // back to the screen; async: start copying the depth out
-    virtual bool readpick(float &depth) = 0;                    // the pick pass's depth (call in the next frame)
+    virtual bool readpick(float &depth) = 0;                    // the pick pass's depth (in the next frame; or in the same one, waiting)
     virtual bool readdepthasync(int x, int y) = 0;              // starts copying one depth value of the screen out
     virtual bool resolvedepthasync(float &depth) = 0;           // ...and fetches it (call in the next frame)
     virtual void readdepth(int x, int y, float &depth) = 0;     // synchronous read of the screen's depth
@@ -143,7 +146,7 @@ extern gfxdevice *gfx;
 extern gfxdevice *gfx_opengl();
 extern gfxdevice *gfx_sdlgpu();
 
-// true while the GL backend is active: parts of the renderer that still call OpenGL directly run only then
+// true while the GL backend is active: the GL-only parts of the renderer that call OpenGL directly run only then
 static inline bool gfx_legacygl() { return gfx->api() == GFX_OPENGL; }
 
 #endif

@@ -15,8 +15,12 @@
 // Copies of the frame into textures (water reflection and refraction, minimap) end the current pass and are blitted
 // after it; FXAA and gamma are passes of their own (postpass()). Stencil (stencil shadows) needs stencilbits 8 at start.
 //
-// Not ported yet: line width and polygon mode (the editor's overlay). The renderer only uses these, and display lists,
-// where gfx_legacygl() is true.
+// Lines are drawn as quads, as Apple's GL rasterizes them (smooth lines with their coverage, any width: widelines()),
+// and polygons in GL_LINE mode as their edges (the editor's cursor). In edit mode the crosshair pick pass is read in the
+// same frame (the edit cursor needs it), submitting the frame so far and continuing it afterwards.
+//
+// Left to the GL backend (gfx_legacygl()): display lists, the GLSL programs of shaders.cpp (the GPU backend has its
+// own), framebuffer objects for the water reflection (it renders and copies) and asynchronous depth reads.
 
 #include "cube.h"
 
@@ -78,8 +82,18 @@ static const char *mslcommon =
     "#if HAS_TC1\n"
     "    TCV tc1 [[attribute(3)]];\n"
     "#endif\n"
+    "#if LINEAA\n"
+    "    float2 lineaa [[attribute(3)]];\n" // (smooth lines have no second texture unit's coordinates)
+    "#endif\n"
     "};\n"
-    "struct VOut { float4 pos [[position]]; TCV tc; TCV tc1; float4 color; float fogdist; };\n"
+    // LINEAA: a smooth line drawn as a quad (widelines()): lineaa = this pixel's distance from the line's centre along
+    // the minor axis, and half the line's width, both in pixels
+    "#if LINEAA\n"
+    "#define LINEAAOUT float2 lineaa [[center_no_perspective]];\n"
+    "#else\n"
+    "#define LINEAAOUT\n"
+    "#endif\n"
+    "struct VOut { float4 pos [[position]]; TCV tc; TCV tc1; float4 color; float fogdist; LINEAAOUT };\n"
     // GL_ARB_texture_env_combine
     "static float4 source(int s, float4 t, float4 p, float4 k, float4 c) { return s == 0 ? t : (s == 1 ? p : (s == 2 ? k : c)); }\n"
     "static float3 argrgb(int s, int op, float4 t, float4 p, float4 k, float4 c)\n"
@@ -156,6 +170,9 @@ static const char *mslvertex =
     "    o.color = u.color;\n"
     "#endif\n"
     "    o.fogdist = length((u.mv * p).xyz);\n" // radial distance, like shaders.cpp's worldshader
+    "#if LINEAA\n"
+    "    o.lineaa = in.lineaa;\n"
+    "#endif\n"
     "    return o;\n"
     "}\n";
 
@@ -165,6 +182,9 @@ static const char *mslfragment =
     "                      sampler s0 [[sampler(0)]], sampler s1 [[sampler(1)]])\n"
     "{\n"
     "    float4 c = shade(in, u, tex0, s0, tex1, s1);\n"
+    "#if LINEAA\n" // GL_LINE_SMOOTH: alpha times the pixel row's coverage by the line (before the alpha test, as in GL)
+    "    c.a *= clamp(min(in.lineaa.x + 0.5, in.lineaa.y) - max(in.lineaa.x - 0.5, -in.lineaa.y), 0.0, 1.0);\n"
+    "#endif\n"
     "    if(u.params.y >= 0.0 && c.a <= u.params.y) discard_fragment();\n"
     "    if(u.fog.z > 0.5) c.rgb = mix(u.fogcolor.rgb, c.rgb, clamp((u.fog.x - in.fogdist) * u.fog.y, 0.0, 1.0));\n"
     "    return c;\n"
@@ -241,6 +261,10 @@ const char *gpuglslsources[] =
     "#if HAS_TC1\n"
     "layout(location = 3) in TCV tc1;\n"
     "#endif\n"
+    "#if LINEAA\n"
+    "layout(location = 3) in vec2 lineaa;\n"
+    "layout(location = 4) noperspective out vec2 olineaa;\n"
+    "#endif\n"
     "#if TEXMAT\n"
     "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; mat4 tex0; mat4 tex1; };\n"
     "#else\n"
@@ -272,6 +296,9 @@ const char *gpuglslsources[] =
     "    ocolor = ucolor;\n"
     "#endif\n"
     "    ofogdist = length((mv * p).xyz);\n"
+    "#if LINEAA\n"
+    "    olineaa = lineaa;\n"
+    "#endif\n"
     "}\n",
 
     "#version 450\n"
@@ -287,6 +314,9 @@ const char *gpuglslsources[] =
     "#endif\n"
     "layout(location = 2) in vec4 color;\n"
     "layout(location = 3) in float fogdist;\n"
+    "#if LINEAA\n"
+    "layout(location = 4) noperspective in vec2 lineaa;\n"
+    "#endif\n"
     "layout(set = 2, binding = 0) uniform sampler2D tex0;\n"
     "layout(set = 2, binding = 1) uniform sampler2D tex1;\n"
     "layout(set = 3, binding = 0) uniform FSU { vec4 fogcolor; vec4 fog; vec4 params; ivec4 units; Unit unit[2]; };\n"
@@ -311,6 +341,9 @@ const char *gpuglslsources[] =
     "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
     "    ocolor = vec4(gl_FragCoord.z);\n"
     "#else\n"
+    "#if LINEAA\n"
+    "    c.a *= clamp(min(lineaa.x + 0.5, lineaa.y) - max(lineaa.x - 0.5, -lineaa.y), 0.0, 1.0);\n"
+    "#endif\n"
     "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
     "    if(fog.z > 0.5) c.rgb = mix(fogcolor.rgb, c.rgb, clamp((fog.x - fogdist) * fog.y, 0.0, 1.0));\n"
     "    ocolor = c;\n"
@@ -362,6 +395,7 @@ struct pipelinekey
     uchar depthtest, depthfunc, depthwrite, cull;
     uchar depthbias, stenciltest, stencilmask, texmatrix;
     uchar sfront[4], sback[4];  // stencil function and fail, depth-fail and pass operations (stencilcode())
+    uchar lineaa, pad[3];       // a smooth line's quads (the LINEAA shader variant)
     float biasfactor, biasunits;
 };
 
@@ -432,6 +466,8 @@ struct sdlgpubackend : gfxdevice
     GLint stencilrefv, clearstencilv;
     GLuint stencilmaskv;
     GLenum stencilface;         // GL_EXT_stencil_two_side's active face
+    GLenum polymode;            // glPolygonMode: GL_FILL, or GL_LINE (polygons drawn as their edges: the editor's cursor)
+    float linewidthv;           // glLineWidth: lines this wide (rounded) or wider are drawn as quads (widelines())
     int stencilbitsv;           // 8 if the depth target has a stencil buffer (stencilbits, for stencil shadows)
     int viewportv[4];
     int activetex, clientunit;
@@ -442,6 +478,9 @@ struct sdlgpubackend : gfxdevice
     // immediate mode
     struct immvert { float pos[3], tc[2], color[4]; };
     vector<immvert> immverts;
+    // lines drawn as quads (widelines()): the vertices plus, for smooth lines, the distance from the line's centre
+    struct quadvert { float pos[3], tc[2], color[4], aa[2]; };
+    vector<quadvert> quadverts;
     GLenum immmode;
     float immtc[2];
 
@@ -456,10 +495,15 @@ struct sdlgpubackend : gfxdevice
     hashtable<pipelinekey, int> pipelineindex;
     vector<SDL_GPUGraphicsPipeline *> pipelines;
     vector<pipelinekey> pipelinekeys;
-    SDL_GPUShader *vshaders[16], *fshaders[2], *pickshaders[2]; // variants: 8 (and [1]) = with texture matrices
+    // shader variants, made when first needed. Vertex: 1, 2, 4 = texture coordinates, colours, unit 1's coordinates in
+    // the vertices, 8 = texture matrices, 16 = smooth line; fragment and pick: 1 = texture matrices, 2 = smooth line
+    SDL_GPUShader *vshaders[32], *fshaders[4], *pickshaders[4];
 
     // the frame being recorded
     bool recording;
+    bool midframe;              // the frame so far was submitted to read the edit cursor's target: the main target continues
+    int widedraw;               // record(): lines drawn as quads from quadverts: 1 = line primitives, 2 = polygon edges
+    bool widesmooth;            // ...smooth lines (with their coverage)
     vector<gpupass> passes;
     vector<gpudraw> draws;
     vector<gpucopy> copies;
@@ -496,6 +540,9 @@ struct sdlgpubackend : gfxdevice
         pickfence(NULL), pickpending(false), frameupload(NULL), frameuploadsize(0)
     {
         framecount = 0;
+        midframe = false;
+        widedraw = 0;
+        widesmooth = false;
         lastuploadsize = smallframes = 0;
         stencilbitsv = 0;
         posttex = postdepth = lastfinal = NULL;
@@ -507,8 +554,8 @@ struct sdlgpubackend : gfxdevice
         postsampler = NULL;
         wantvsync = -1;
         presentmode = SDL_GPUPresentMode(-1);
-        loopi(16) vshaders[i] = NULL;
-        loopi(2) fshaders[i] = pickshaders[i] = NULL;
+        loopi(32) vshaders[i] = NULL;
+        loopi(4) fshaders[i] = pickshaders[i] = NULL;
         resetstate();
         textures.add(); // handle 0: no texture
         memset(&textures[0], 0, sizeof(gputexture));
@@ -539,6 +586,8 @@ struct sdlgpubackend : gfxdevice
         stencilrefv = clearstencilv = 0;
         stencilmaskv = ~0U;
         stencilface = GL_FRONT;
+        polymode = GL_FILL;
+        linewidthv = 1;
         activetex = clientunit = 0;
         loopi(4) boundtex[i] = 0;
         loopi(NUMATTRS) { memset(&arrays[i], 0, sizeof(gpuarray)); }
@@ -805,7 +854,8 @@ struct sdlgpubackend : gfxdevice
 
     SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, int variant, int samplers, int uniforms)
     {
-        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n#define TEXMAT %d\n", variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0, variant&8 ? 1 : 0);
+        defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n#define TEXMAT %d\n#define LINEAA %d\n",
+            variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0, variant&8 ? 1 : 0, variant&16 ? 1 : 0);
         vector<char> src;
         src.put(defs, strlen(defs));
         src.put(mslcommon, strlen(mslcommon));
@@ -825,17 +875,16 @@ struct sdlgpubackend : gfxdevice
         return s;
     }
 
-    bool loadshaders()
+    SDL_GPUShader *vertexshader(int variant)
     {
-        if(fshaders[0]) return true;
-        loopi(16) if(!(vshaders[i] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, i, 0, 1))) return false;
-        loopi(2)
-        {
-            fshaders[i] = makeshader(mslfragment, "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, 7 | (i ? 8 : 0), 2, 1);
-            pickshaders[i] = makeshader(mslpick, "fpick", SDL_GPU_SHADERSTAGE_FRAGMENT, 7 | (i ? 8 : 0), 2, 1);
-            if(!fshaders[i] || !pickshaders[i]) { fshaders[0] = NULL; return false; }
-        }
-        return true;
+        if(!vshaders[variant]) vshaders[variant] = makeshader(mslvertex, "vmain", SDL_GPU_SHADERSTAGE_VERTEX, variant, 0, 1);
+        return vshaders[variant];
+    }
+    SDL_GPUShader *fragmentshader(bool pick, int variant) // variant: 1 = texture matrices, 2 = smooth line
+    {
+        SDL_GPUShader *&s = (pick ? pickshaders : fshaders)[variant];
+        if(!s) s = makeshader(pick ? mslpick : mslfragment, pick ? "fpick" : "fmain", SDL_GPU_SHADERSTAGE_FRAGMENT, 7 | (variant&1 ? 8 : 0) | (variant&2 ? 16 : 0), 2, 1);
+        return s;
     }
 
     static SDL_GPUBlendFactor blendfactor(GLenum f)
@@ -876,7 +925,6 @@ struct sdlgpubackend : gfxdevice
     {
         int *idx = pipelineindex.access(k);
         if(idx) return *idx;
-        if(!loadshaders()) return -1;
 
         SDL_GPUVertexBufferDescription vbd[NUMATTRS];
         SDL_GPUVertexAttribute va[NUMATTRS];
@@ -893,7 +941,7 @@ struct sdlgpubackend : gfxdevice
             va[n].offset = 0;
             n++;
         }
-        int variant = (k.attrs[ATTR_TC] ? 1 : 0) | (k.attrs[ATTR_COLOR] ? 2 : 0) | (k.attrs[ATTR_TC1] ? 4 : 0) | (k.texmatrix ? 8 : 0);
+        int variant = (k.attrs[ATTR_TC] ? 1 : 0) | (k.attrs[ATTR_COLOR] ? 2 : 0) | (k.attrs[ATTR_TC1] && !k.lineaa ? 4 : 0) | (k.texmatrix ? 8 : 0) | (k.lineaa ? 16 : 0);
 
         SDL_GPUColorTargetDescription ctd;
         memset(&ctd, 0, sizeof(ctd));
@@ -911,8 +959,9 @@ struct sdlgpubackend : gfxdevice
 
         SDL_GPUGraphicsPipelineCreateInfo pi;
         memset(&pi, 0, sizeof(pi));
-        pi.vertex_shader = vshaders[variant];
-        pi.fragment_shader = (k.target == TARGET_PICK ? pickshaders : fshaders)[k.texmatrix ? 1 : 0];
+        pi.vertex_shader = vertexshader(variant);
+        pi.fragment_shader = fragmentshader(k.target == TARGET_PICK, (k.texmatrix ? 1 : 0) | (k.lineaa ? 2 : 0));
+        if(!pi.vertex_shader || !pi.fragment_shader) return -1;
         pi.vertex_input_state.vertex_buffer_descriptions = vbd;
         pi.vertex_input_state.num_vertex_buffers = n;
         pi.vertex_input_state.vertex_attributes = va;
@@ -995,7 +1044,8 @@ struct sdlgpubackend : gfxdevice
     void cullface(GLenum face) { cullmode = face; }
     void alphafunc(GLenum func, GLfloat ref) { alphafn = func; alpharef = ref; }
     void polygonoffset(GLfloat factor, GLfloat units) { offsetfactor = factor; offsetunits = units; }
-    void linewidth(GLfloat w) {} // (SDL GPU draws 1-pixel lines only)
+    void linewidth(GLfloat w) { linewidthv = w; }
+    void polygonmode(GLenum face, GLenum mode) { polymode = mode == GL_LINE ? GL_LINE : GL_FILL; } // (GL_POINT: filled)
     void color3f(GLfloat r, GLfloat g, GLfloat b) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = 1; }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { curcolor[0] = r; curcolor[1] = g; curcolor[2] = b; curcolor[3] = a; }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { color3f(r/255.0f, g/255.0f, b/255.0f); }
@@ -1157,7 +1207,7 @@ struct sdlgpubackend : gfxdevice
             case GL_MODELVIEW_MATRIX: memcpy(v, stacks[0][stackpos[0]].v, 16*sizeof(float)); break;
             case GL_PROJECTION_MATRIX: memcpy(v, stacks[1][stackpos[1]].v, 16*sizeof(float)); break;
             case GL_CURRENT_COLOR: loopi(4) v[i] = curcolor[i]; break;
-            case GL_LINE_WIDTH: v[0] = 1; break;
+            case GL_LINE_WIDTH: v[0] = linewidthv; break;
             default: v[0] = 0; break;
         }
     }
@@ -1439,7 +1489,8 @@ struct sdlgpubackend : gfxdevice
         beginrecording();
         if(curpass >= 0 && passes[curpass].target == target) return passes[curpass];
         // a target's first pass in a frame always clears (on tile-based GPUs that's cheaper than loading the old contents)
-        bool first = true;
+        // (not after a submission in the middle of the frame: the main target continues what was drawn before it)
+        bool first = !(midframe && target == TARGET_MAIN);
         loopv(passes) if(passes[i].target == target) first = false;
         gpupass &p = passes.add();
         p.target = target;
@@ -1527,13 +1578,21 @@ struct sdlgpubackend : gfxdevice
         // vertex sources
         if(immediate)
         {
-            uint off = arenaput(immverts.getbuf(), immverts.length()*sizeof(immvert));
-            k.attrs[ATTR_POS] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3; k.pitch[ATTR_POS] = sizeof(immvert);
+            // (quadverts start with the same fields as immverts)
+            ushort stride = widedraw ? sizeof(quadvert) : sizeof(immvert);
+            uint off = widedraw ? arenaput(quadverts.getbuf(), quadverts.length()*sizeof(quadvert)) : arenaput(immverts.getbuf(), immverts.length()*sizeof(immvert));
+            k.attrs[ATTR_POS] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3; k.pitch[ATTR_POS] = stride;
             d.vbsrc[ATTR_POS] = SRC_ARENA; d.vboffset[ATTR_POS] = off + offsetof(immvert, pos);
-            k.attrs[ATTR_TC] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; k.pitch[ATTR_TC] = sizeof(immvert);
+            k.attrs[ATTR_TC] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; k.pitch[ATTR_TC] = stride;
             d.vbsrc[ATTR_TC] = SRC_ARENA; d.vboffset[ATTR_TC] = off + offsetof(immvert, tc);
-            k.attrs[ATTR_COLOR] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4; k.pitch[ATTR_COLOR] = sizeof(immvert);
+            k.attrs[ATTR_COLOR] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4; k.pitch[ATTR_COLOR] = stride;
             d.vbsrc[ATTR_COLOR] = SRC_ARENA; d.vboffset[ATTR_COLOR] = off + offsetof(immvert, color);
+            if(widedraw && widesmooth)
+            {
+                k.attrs[ATTR_TC1] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; k.pitch[ATTR_TC1] = stride;
+                d.vbsrc[ATTR_TC1] = SRC_ARENA; d.vboffset[ATTR_TC1] = off + offsetof(quadvert, aa);
+                k.lineaa = 1;
+            }
         }
         else loopi(NUMATTRS)
         {
@@ -1560,8 +1619,12 @@ struct sdlgpubackend : gfxdevice
         }
         if(!k.attrs[ATTR_POS]) { draws.pop(); return; }
 
-        // primitives (everything without a GL element buffer has been turned into lists already)
-        switch(mode)
+        // primitives (everything without a GL element buffer has been turned into lists already; polygons in GL_LINE
+        // mode into their edges, wide lines into quads)
+        bool edges = drawsedges(mode);
+        if(widedraw) k.topology = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+        else if(edges) k.topology = SDL_GPU_PRIMITIVETYPE_LINELIST;
+        else switch(mode)
         {
             case GL_TRIANGLE_STRIP: k.topology = ibuffer ? SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP : SDL_GPU_PRIMITIVETYPE_TRIANGLELIST; break;
             case GL_LINES: case GL_LINE_STRIP: case GL_LINE_LOOP: k.topology = SDL_GPU_PRIMITIVETYPE_LINELIST; break;
@@ -1584,8 +1647,15 @@ struct sdlgpubackend : gfxdevice
         k.depthtest = caps[capindex(GL_DEPTH_TEST)];
         k.depthfunc = k.depthtest ? uchar(depthfn - GL_NEVER) : 0;
         k.depthwrite = k.depthtest && depthwrite;
-        k.cull = caps[capindex(GL_CULL_FACE)] && k.topology != SDL_GPU_PRIMITIVETYPE_LINELIST ? (cullmode == GL_FRONT ? 1 : (cullmode == GL_BACK ? 2 : 0)) : 0;
-        if(caps[capindex(GL_POLYGON_OFFSET_FILL)]) { k.depthbias = 1; k.biasfactor = offsetfactor; k.biasunits = offsetunits; }
+        // (culling applies to filled polygons only: the edges of culled polygons in GL_LINE mode aren't left out; the
+        // editor draws them with culling off)
+        bool polygons = k.topology == SDL_GPU_PRIMITIVETYPE_TRIANGLELIST || k.topology == SDL_GPU_PRIMITIVETYPE_TRIANGLESTRIP;
+        k.cull = caps[capindex(GL_CULL_FACE)] && polygons && !widedraw ? (cullmode == GL_FRONT ? 1 : (cullmode == GL_BACK ? 2 : 0)) : 0;
+        // GL's polygon offset: GL_POLYGON_OFFSET_FILL for filled polygons, GL_POLYGON_OFFSET_LINE for polygons drawn as
+        // lines, none for line primitives
+        bool offset = widedraw ? widedraw == 2 && caps[capindex(GL_POLYGON_OFFSET_LINE)] :
+                      (edges ? caps[capindex(GL_POLYGON_OFFSET_LINE)] : polygons && caps[capindex(GL_POLYGON_OFFSET_FILL)]);
+        if(offset) { k.depthbias = 1; k.biasfactor = offsetfactor; k.biasunits = offsetunits; }
         if(caps[capindex(GL_STENCIL_TEST)] && stencilbitsv && !picking)
         {
             k.stenciltest = 1;
@@ -1662,10 +1732,33 @@ struct sdlgpubackend : gfxdevice
         pass.numdraws++;
     }
 
+    static bool ispolygon(GLenum mode)
+    {
+        return mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN || mode == GL_QUADS || mode == GL_POLYGON;
+    }
+    bool drawsedges(GLenum mode) const { return polymode == GL_LINE && ispolygon(mode); }
+
+    // the edges of polygons (GL_LINE polygon mode), as GL draws them: each triangle's three, a quad's or polygon's outline
+    // (not the diagonals they're split into for filling)
+    void listedges(GLenum mode, int o, int count)
+    {
+        #define EDGE(a, b) { indexarena.add(o+(a)); indexarena.add(o+(b)); }
+        switch(mode)
+        {
+            case GL_TRIANGLES: for(int i = 0; i + 2 < count; i += 3) { EDGE(i, i+1); EDGE(i+1, i+2); EDGE(i+2, i); } break;
+            case GL_TRIANGLE_STRIP: for(int i = 0; i + 2 < count; i++) { EDGE(i, i+1); EDGE(i+1, i+2); EDGE(i+2, i); } break;
+            case GL_TRIANGLE_FAN: for(int i = 1; i + 1 < count; i++) { EDGE(0, i); EDGE(i, i+1); EDGE(i+1, 0); } break;
+            case GL_QUADS: for(int i = 0; i + 3 < count; i += 4) loopj(4) EDGE(i+j, i+(j+1)%4); break;
+            case GL_POLYGON: if(count >= 3) loopi(count) EDGE(i, (i+1)%count); break;
+        }
+        #undef EDGE
+    }
+
     // GL primitives as 32-bit index lists (relative to the first vertex)
     void listindices(GLenum mode, int first, int count, int base)
     {
         int o = first - base;
+        if(drawsedges(mode)) { listedges(mode, o, count); return; }
         switch(mode)
         {
             case GL_TRIANGLES: case GL_LINES: case GL_POINTS:
@@ -1739,7 +1832,7 @@ struct sdlgpubackend : gfxdevice
         if(count <= 0) return;
         beginrecording();
         gpubuffer *eb = boundbuffer(GL_ELEMENT_ARRAY_BUFFER_ARB);
-        if(eb && type == GL_UNSIGNED_SHORT && (mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP))
+        if(eb && type == GL_UNSIGNED_SHORT && (mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP) && !drawsedges(mode))
         {
             // indices in a buffer object: drawn from there (vertices from buffer objects too)
             record(mode, 0, 0, 0, count, true, uint((uintptr_t)indices));
@@ -1783,9 +1876,88 @@ struct sdlgpubackend : gfxdevice
         beginrecording();
         uint start = indexarena.length();
         listindices(immmode, 0, immverts.length(), 0);
+        bool lines = drawsedges(immmode) || immmode == GL_LINES || immmode == GL_LINE_STRIP || immmode == GL_LINE_LOOP;
+        if(lines && (caps[capindex(GL_LINE_SMOOTH)] || int(linewidthv + 0.5f) >= 2)) widelines(start, drawsedges(immmode));
         // immediate-mode vertices always carry a texture coordinate and a colour (the current ones)
-        record(immmode, 0, immverts.length(), start, indexarena.length() - start, false, 0, true);
+        else record(immmode, 0, immverts.length(), start, indexarena.length() - start, false, 0, true);
         immverts.setsize(0);
+    }
+
+    // Lines as GL draws them where Metal and Vulkan can't (Apple's GL, measured with a test program):
+    // - smooth lines (GL_LINE_SMOOTH, which the game always enables): fragments wherever a band (max(w, 1) + 1) / 2
+    //   pixels either side of the line along its minor axis covers a pixel centre (or sample), with alpha times the
+    //   pixel row's overlap with [-w/2, w/2] - so with blending off, a 1-pixel line colours two rows;
+    // - aliased lines 2 pixels or wider: a band of round(w) pixels along the minor axis.
+    // Each segment of the index list from start becomes a quad (a parallelogram: the band, not extended past the ends).
+    // The corners are computed in eye space, so depth, fog and clipping work as for the line itself; segments are
+    // clipped to the near plane first. (Immediate mode only: the game draws all its lines that way.)
+    void widelines(uint start, bool edges)
+    {
+        const gmat &mv = stacks[0][stackpos[0]], &proj = stacks[1][stackpos[1]];
+        glmatrixf p, pinv;
+        memcpy(p.v, proj.v, sizeof(p.v));
+        if(!pinv.invert(p)) { indexarena.setsize(start); return; }
+        bool smooth = caps[capindex(GL_LINE_SMOOTH)];
+        float w = clamp(linewidthv, 0.0f, 16.0f), band = smooth ? (max(w, 1.0f) + 1) * 0.5f : int(w + 0.5f) * 0.5f, cover = w * 0.5f,
+              sx = max(viewportv[2], 1) * 0.5f, sy = max(viewportv[3], 1) * 0.5f;
+        quadverts.setsize(0);
+        for(int i = start; i + 1 < indexarena.length(); i += 2)
+        {
+            immvert v[2] = { immverts[indexarena[i]], immverts[indexarena[i+1]] };
+            vec4 e[2], c[2];
+            loopj(2)
+            {
+                const float *a = v[j].pos;
+                loopk(4) e[j][k] = mv.v[k]*a[0] + mv.v[4+k]*a[1] + mv.v[8+k]*a[2] + mv.v[12+k];
+                loopk(4) c[j][k] = p.v[k]*e[j].x + p.v[4+k]*e[j].y + p.v[8+k]*e[j].z + p.v[12+k]*e[j].w;
+            }
+            // near plane (GL clip space: z >= -w)
+            float d0 = c[0].z + c[0].w, d1 = c[1].z + c[1].w;
+            if(d0 < 0 && d1 < 0) continue;
+            loopj(2) if((j ? d1 : d0) < 0)
+            {
+                float t = (j ? d1 : d0) / ((j ? d1 : d0) - (j ? d0 : d1));
+                immvert &a = v[j], &b = v[1-j];
+                loopk(3) a.pos[k] += (b.pos[k] - a.pos[k]) * t;
+                loopk(2) a.tc[k] += (b.tc[k] - a.tc[k]) * t;
+                loopk(4) a.color[k] += (b.color[k] - a.color[k]) * t;
+                loopk(4) { e[j][k] += (e[1-j][k] - e[j][k]) * t; c[j][k] += (c[1-j][k] - c[j][k]) * t; }
+            }
+            if(c[0].w <= 1e-6f || c[1].w <= 1e-6f) continue;
+            float dx = (c[1].x/c[1].w - c[0].x/c[0].w) * sx, dy = (c[1].y/c[1].w - c[0].y/c[0].w) * sy;
+            if(dx == 0 && dy == 0) continue; // (GL draws nothing for a zero-length line)
+            bool xmajor = fabs(dx) >= fabs(dy);
+            loopj(2)
+            {
+                // the band's half-height in pixels, as an eye-space offset at this end's depth
+                vec4 o(xmajor ? 0 : band / sx * c[j].w, xmajor ? band / sy * c[j].w : 0, 0, 0), d;
+                loopk(4) d[k] = pinv.v[k]*o.x + pinv.v[4+k]*o.y;
+                loopk(2)
+                {
+                    quadvert &q = quadverts.add();
+                    memcpy(q.pos, v[j].pos, sizeof(immvert));
+                    float sgn = k ? -1 : 1, ew = e[j].w + sgn*d.w;
+                    loopl(3) q.pos[l] = (e[j][l] + sgn*d[l]) / ew;
+                    q.aa[0] = sgn*band; q.aa[1] = cover;
+                }
+            }
+        }
+        indexarena.setsize(start);
+        if(quadverts.empty()) return;
+        for(int i = 0; i + 3 < quadverts.length(); i += 4)
+        {
+            indexarena.add(i); indexarena.add(i+1); indexarena.add(i+2);
+            indexarena.add(i+1); indexarena.add(i+3); indexarena.add(i+2);
+        }
+        // drawn in eye space (the modelview matrix is in the vertices now)
+        gmat keep = stacks[0][stackpos[0]];
+        stacks[0][stackpos[0]].identity();
+        widedraw = edges ? 2 : 1;
+        widesmooth = smooth;
+        record(GL_TRIANGLES, 0, quadverts.length(), start, indexarena.length() - start, false, 0, true);
+        widedraw = 0;
+        widesmooth = false;
+        stacks[0][stackpos[0]] = keep;
     }
 
     // --- crosshair pick pass
@@ -1807,6 +1979,8 @@ struct sdlgpubackend : gfxdevice
 
     bool readpick(float &depth)
     {
+        // in the frame that drew it (the edit cursor): submit what's recorded so far, then wait as for the next frame
+        if(recording) loopv(passes) if(passes[i].target == TARGET_PICK) { submitframe(false, true); break; }
         if(!pickpending || !pickfence) return false;
         SDL_WaitForGPUFences(dev, true, &pickfence, 1);
         SDL_ReleaseGPUFence(dev, pickfence);
@@ -2059,7 +2233,9 @@ struct sdlgpubackend : gfxdevice
 
     // submits the recorded frame; show: also copies it to the swapchain (present()), else it's only rendered into the
     // offscreen target, for readpixels()
-    void submitframe(bool show)
+    // show: the end of the frame (presented); otherwise submitted to read something back, and continuing: the rest of
+    // the frame follows (the main target keeps what was drawn)
+    void submitframe(bool show, bool continuing = false)
     {
         if(!dev) return;
         extern int screenw, screenh;
@@ -2153,6 +2329,7 @@ struct sdlgpubackend : gfxdevice
         SDL_SubmitGPUCommandBuffer(cmd);
         recording = false;
         curpass = -1;
+        midframe = continuing;
     }
 
     // as glReadPixels() would return it (bottom row first): the frame being recorded (which is submitted for this, e.g.
@@ -2184,6 +2361,38 @@ struct sdlgpubackend : gfxdevice
                 const uchar *s = p + (h - 1 - row)*w*4 + first;
                 loop(col, w) { loopk(bpp) out[k] = s[k]; out += bpp; s += 4; }
             }
+            SDL_UnmapGPUTransferBuffer(dev, tb);
+        }
+        SDL_ReleaseGPUTransferBuffer(dev, tb);
+    }
+
+    // level 0 of a texture as glGetTexImage returns it (mapshot: the minimap). Textures are stored in GL's row order
+    // (copies of the frame are flipped into it), so the rows come out as they are.
+    void gettexture(GLuint t, GLenum format, void *pixels)
+    {
+        if(recording) submitframe(false);
+        else flushuploads();
+        if(!dev || t >= (GLuint)textures.length() || !textures[t].tex) return;
+        int w = textures[t].w, h = textures[t].h, bpp = format == GL_RGBA ? 4 : 3;
+        if(w <= 0 || h <= 0) return;
+        SDL_GPUTransferBufferCreateInfo tbi = { SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, (Uint32)(w*h*4), 0 };
+        SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &tbi);
+        SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(dev);
+        if(!tb || !cmd) { if(tb) SDL_ReleaseGPUTransferBuffer(dev, tb); if(cmd) SDL_CancelGPUCommandBuffer(cmd); return; }
+        SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureRegion src;
+        memset(&src, 0, sizeof(src));
+        src.texture = textures[t].tex; src.w = w; src.h = h; src.d = 1;
+        SDL_GPUTextureTransferInfo dst = { tb, 0, (Uint32)w, (Uint32)h };
+        SDL_DownloadFromGPUTexture(copy, &src, &dst);
+        SDL_EndGPUCopyPass(copy);
+        SDL_GPUFence *f = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+        if(f) { SDL_WaitForGPUFences(dev, true, &f, 1); SDL_ReleaseGPUFence(dev, f); }
+        const uchar *p = (const uchar *)SDL_MapGPUTransferBuffer(dev, tb, false);
+        if(p)
+        {
+            uchar *out = (uchar *)pixels;
+            loopi(w*h) { loopk(bpp) out[k] = p[k]; out += bpp; p += 4; }
             SDL_UnmapGPUTransferBuffer(dev, tb);
         }
         SDL_ReleaseGPUTransferBuffer(dev, tb);

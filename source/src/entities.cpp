@@ -282,13 +282,13 @@ void renderentarrow(const entity &e, const vec &dir, float radius)
     renderentarrow(e,dir,radius,color);
 }
 
-void rendereditentities()
+void rendereditentities(bool pick) // pick: into the crosshair pick pass (no sparklies)
 {
     if(!editmode || cleanedit) return;
     int closest = closestent();
 
     static int lastsparkle = 0;
-    if(lastmillis - lastsparkle >= 20)
+    if(!pick && lastmillis - lastsparkle >= 20)
     { // render edit mode sparklies
         lastsparkle = lastmillis - (lastmillis%20);
         loopv(ents)

@@ -988,7 +988,7 @@ extern void toucheditingsettings(bool forcerestart = true);
 extern int edithideentmask;
 extern int showeditingsettings;
 extern void pickupeffects(int n, playerent *d);
-extern void rendereditentities();
+extern void rendereditentities(bool pick = false);
 extern void renderentities();
 extern void rendermapmodels();
 extern void resetpickups(int type = -1);

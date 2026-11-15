@@ -410,12 +410,7 @@ void mapscreenshot(const char *imagepath, bool mapshot, int fileformat, float sc
     if(mapshot)
     {
         extern GLuint minimaptex;
-        if(minimaptex && gfx_legacygl()) // (the GPU backend has no minimap yet)
-        {
-            glPixelStorei(GL_PACK_ALIGNMENT, 1);
-            glBindTexture(GL_TEXTURE_2D, minimaptex);
-            glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, tmpdst);
-        }
+        if(minimaptex) gfx->gettexture(minimaptex, GL_RGB, tmpdst);
         else
         {
             conoutf("no mapshot prepared!");

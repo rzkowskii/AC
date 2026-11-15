@@ -1284,6 +1284,14 @@ static void renderdepthpick(int w, int h)
     startmodelbatches();
     rendermapmodelsalongray(raynear, raydir);
     endmodelbatches();
+    // in edit mode (GPU backend), what the main pass has drawn by the time the GL renderer reads its depth there: the
+    // edit-mode entity models, clip boxes and arrows
+    if(editmode)
+    {
+        startmodelbatches();
+        rendereditentities(true);
+        endmodelbatches();
+    }
     dynshadow = keepdynshadow;
 
     depthinpbo = asyncdepth && hasPBO; // on drivers that read asynchronously, start copying the result right away
@@ -1304,6 +1312,13 @@ void readdepth(int w, int h, vec &pos)
     if(pickdrawn && &pos == &worldpos) // the target was drawn by the pick pass: nothing to read in the middle of the frame
     {
         pickdrawn = false;
+        if(editmode) // (GPU backend) the edit cursor needs this frame's target, as with GL's read of the main pass
+        {
+            float d;
+            depthpending = false;
+            if(gfx->readpick(d)) depthtoworldpos(d, depthinvmvp, depthfrom, pos);
+            return;
+        }
         if(depthcheck)
         {
             float syncdepth, keepcursordepth = cursordepth;
@@ -1337,8 +1352,6 @@ VARP(ignoreoverride_nowaterreflect, 0, 0, 1);
 VARP(ignoreoverride_nostencilshadows, 0, 0, 1);
 
 int effective_stencilshadow = 0;
-// "gpuparity 1" (testing): the GL renderer also leaves out what the GPU backend doesn't draw yet, for like-for-like comparisons
-VAR(gpuparity, 0, 0, 1);
 
 bool isoverview = false;
 
@@ -1408,8 +1421,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
             (int)camera1->yaw, (int)camera1->pitch, dynfov(), fovy, w, h);
     rpmark(RP_WORLDGEN);
 
-    // crosshair target: drawn in its own small pass *before* the main pass starts (see renderdepthpick())
-    if(depthpick && hasFBO && !editmode) renderdepthpick(w, h);
+    // crosshair target: drawn in its own small pass *before* the main pass starts (see renderdepthpick()). In edit mode
+    // the GL renderer reads the main pass's depth in the middle of the frame, which the GPU backend can't: it draws the
+    // pick pass then too, with what edit mode adds, and readdepth() waits for it
+    if((depthpick && hasFBO && !editmode) || (editmode && !gfx_legacygl())) renderdepthpick(w, h);
     rpmark(RP_DEPTHPICK);
 
     if(effective_stencilshadow && hasstencil && stencilbits >= 8) gfx->clearstencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
@@ -1476,7 +1491,6 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     render_particles(curtime, PT_DECAL_MASK);
 
     int nquads = renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex);
-    bool legacy = gfx_legacygl() && !gpuparity; // (the editor overlay isn't ported to the GPU backend yet)
 
     render_particles(curtime, ~PT_DECAL_MASK);
     rpmark(RP_EFFECTS);
@@ -1484,15 +1498,15 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     gfx->disable(GL_FOG);
     gfx->disable(GL_TEXTURE_2D);
 
-    if(editmode && legacy)
+    if(editmode)
     {
         if(cursordepth==1.0f) worldpos = camera1->o;
         enablepolygonoffset(GL_POLYGON_OFFSET_LINE);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        gfx->polygonmode(GL_FRONT_AND_BACK, GL_LINE);
         gfx->depthmask(GL_FALSE);
         cursorupdate();
         gfx->depthmask(GL_TRUE);
-        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        gfx->polygonmode(GL_FRONT_AND_BACK, GL_FILL);
         disablepolygonoffset(GL_POLYGON_OFFSET_LINE, false);
     }
     extern vector<int> tagclipcubes;

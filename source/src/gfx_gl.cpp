@@ -68,6 +68,7 @@ struct glbackend : gfxdevice
     void alphafunc(GLenum func, GLfloat ref) { glAlphaFunc(func, ref); }
     void polygonoffset(GLfloat factor, GLfloat units) { glPolygonOffset(factor, units); }
     void linewidth(GLfloat w) { glLineWidth(w); }
+    void polygonmode(GLenum face, GLenum mode) { glPolygonMode(face, mode); }
     void color3f(GLfloat r, GLfloat g, GLfloat b) { glColor3f(r, g, b); }
     void color4f(GLfloat r, GLfloat g, GLfloat b, GLfloat a) { glColor4f(r, g, b, a); }
     void color3ub(GLubyte r, GLubyte g, GLubyte b) { glColor3ub(r, g, b); }
@@ -106,6 +107,12 @@ struct glbackend : gfxdevice
     void copytexsubimage2d(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint x, GLint y, GLsizei w, GLsizei h)
     {
         glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, w, h);
+    }
+    void gettexture(GLuint t, GLenum format, void *pixels)
+    {
+        glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        glBindTexture(GL_TEXTURE_2D, t);
+        glGetTexImage(GL_TEXTURE_2D, 0, format, GL_UNSIGNED_BYTE, pixels);
     }
 
     void genbuffers(GLsizei n, GLuint *b) { glGenBuffers_(n, b); }

@@ -362,7 +362,7 @@ void cursorupdate()                                     // called every frame fr
         }
     }
 
-    glLineWidth(1);
+    gfx->linewidth(1);
 }
 
 vector<block *> undos, redos;                           // unlimited undo
@@ -797,12 +797,12 @@ void renderhudtexturepreview(int slot, int pos, bool highlight)
     draw_text(texslotnumber, x + bs / 2 - text_width(texslotnumber) / 2, y + bs + border + FONTH / 8);
     if(highlight)
     {
-        glDisable(GL_BLEND);
-        glDisable(GL_TEXTURE_2D);
+        gfx->disable(GL_BLEND);
+        gfx->disable(GL_TEXTURE_2D);
         border /= 2;
         box2d(x - border, y - border, x + bs + border, y + bs + border, 200);
-        glEnable(GL_BLEND);
-        glEnable(GL_TEXTURE_2D);
+        gfx->enable(GL_BLEND);
+        gfx->enable(GL_TEXTURE_2D);
     }
 }
 
@@ -874,13 +874,13 @@ void rendereditingsettings()
         }
         if(showing)
         {
-            glDepthMask(GL_FALSE);
-            glDisable(GL_TEXTURE_2D);
-            glDisable(GL_BLEND);
+            gfx->depthmask(GL_FALSE);
+            gfx->disable(GL_TEXTURE_2D);
+            gfx->disable(GL_BLEND);
             int boxsize = VIRTW/32, boxline = 3*boxsize/2;
             int border = 2;
             int x1 = FONTH/2 - (showeditingsettings == 1 ? deltax : 0), y1 = 3 * VIRTH/8, x2 = x1 + boxsize;
-            float prevlinew; glGetFloatv(GL_LINE_WIDTH, &prevlinew); glLineWidth(border);
+            float prevlinew; gfx->getfloatv(GL_LINE_WIDTH, &prevlinew); gfx->linewidth(border);
             loopi(MAXENTTYPES)
             {
                 if(i>NOTUSED && i<=DUMMYENT)
@@ -891,39 +891,39 @@ void rendereditingsettings()
                     // render text first – makes it slide in/out behind the boxes
                     if(showeditingsettings==3||keepshowingeditingsettingsfrom) // 3:all,always || ( 2:text,at first, 1:all,at first )
                     {
-                        glEnable(GL_TEXTURE_2D); glEnable(GL_BLEND);
+                        gfx->enable(GL_TEXTURE_2D); gfx->enable(GL_BLEND);
                         defformatstring(entlabel)("\f%d%s", ishidden?4:5, entnames[i]);
                         draw_text(entlabel, x1 + boxline -(showeditingsettings == 2 ? deltax : 0), y1 );
-                        glDisable(GL_TEXTURE_2D); glDisable(GL_BLEND);
+                        gfx->disable(GL_TEXTURE_2D); gfx->disable(GL_BLEND);
                     }
                     // now the box
                     partcolour &pc = partcolours[i];
-                    glColor3f(pc.r, pc.g, pc.b);
-                    glBegin(GL_TRIANGLE_STRIP);
-                    glVertex2d(x1, y1);
-                    glVertex2d(x2, y1);
-                    glVertex2d(x1, y2);
-                    glVertex2d(x2, y2);
-                    glEnd();
+                    gfx->color3f(pc.r, pc.g, pc.b);
+                    gfx->begin(GL_TRIANGLE_STRIP);
+                    gfx->vertex2f(x1, y1);
+                    gfx->vertex2f(x2, y1);
+                    gfx->vertex2f(x1, y2);
+                    gfx->vertex2f(x2, y2);
+                    gfx->end();
                     // and the border
                     box2d(x1-border, y1-border, x2+border, y2+border, ishidden?0:200);
                     // crossed-out like in menu
                     if(ishidden){
-                        glColor3d(0,0,0);
-                        glBegin(GL_LINES);
-                        glVertex2d(x1, y1);
-                        glVertex2d(x2, y2);
-                        glVertex2d(x1, y2);
-                        glVertex2d(x2, y1);
-                        glEnd();
+                        gfx->color3f(0, 0, 0);
+                        gfx->begin(GL_LINES);
+                        gfx->vertex2f(x1, y1);
+                        gfx->vertex2f(x2, y2);
+                        gfx->vertex2f(x1, y2);
+                        gfx->vertex2f(x2, y1);
+                        gfx->end();
                     }
                 }
             }
-            glLineWidth(prevlinew);
-            glEnable(GL_TEXTURE_2D);
-            glDepthMask(GL_TRUE);
+            gfx->linewidth(prevlinew);
+            gfx->enable(GL_TEXTURE_2D);
+            gfx->depthmask(GL_TRUE);
         }
-        glEnable(GL_BLEND);
+        gfx->enable(GL_BLEND);
     }
     else
     {
