@@ -58,6 +58,30 @@ ifneq (,$(findstring MINGW,$(PLATFORM)))
 WINDRES= windres
 CLIENT_INCLUDES= $(INCLUDES) -I../include
 CLIENT_LIBS= -mwindows -L../lib -lSDL2 -lSDL2_image -lzdll -lopengl32 -lenet -lOpenAL32 -llibvorbisfile -lws2_32 -lwinmm
+else ifeq ($(PLATFORM),Darwin)
+# Native macOS build (arm64 on Apple Silicon, x86_64 on Intel).
+# By default it links against Homebrew/MacPorts SDL2, SDL2_image and libvorbis (sdl2-config in PATH) - fine for development.
+# For a distributable build, source/macos/make-app.sh sets MACOS_DEPS to the universal static libraries made by
+# source/macos/build-deps.sh, and MACOS_ARCH to the architecture being built (one build per architecture, then lipo).
+ifdef MACOS_DEPS
+SDL2_CONFIG?= $(MACOS_DEPS)/bin/sdl2-config
+# (static SDL2's sdl2-config omits the frameworks used by its game controller and rumble support)
+SDL2_LIBS= `$(SDL2_CONFIG) --static-libs` -Wl,-weak_framework,GameController -Wl,-weak_framework,CoreHaptics
+# OpenAL Soft (HRTF 3D audio) instead of Apple's deprecated OpenAL.framework; the app ships it in Contents/Frameworks
+MACOS_DEPS_INCLUDES= -I$(MACOS_DEPS)/include -DAC_OPENAL_SOFT
+MACOS_DEPS_LIBS= -L$(MACOS_DEPS)/lib
+MACOS_OPENAL= -lopenal -Wl,-rpath,@executable_path/../Frameworks
+else
+SDL2_CONFIG?= sdl2-config
+SDL2_LIBS= `$(SDL2_CONFIG) --libs`
+MACOS_OPENAL= -framework OpenAL
+endif
+ifdef MACOS_ARCH
+override CXXFLAGS+= -arch $(MACOS_ARCH)
+ENET_CFLAGS+= -arch $(MACOS_ARCH)
+endif
+CLIENT_INCLUDES= $(INCLUDES) `$(SDL2_CONFIG) --cflags` $(MACOS_DEPS_INCLUDES) -idirafter ../include
+CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) -lSDL2_image $(SDL2_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
 else
 USRLIB=$(shell if [ -e /usr/lib64 ]; then echo "/usr/lib64"; else echo "/usr/lib"; fi)
 CLIENT_INCLUDES= $(INCLUDES) -I/usr/include `sdl2-config --cflags` -idirafter ../include
@@ -124,13 +148,17 @@ CLIENT_PCH= cube.h.gch
 ifneq (,$(findstring MINGW,$(PLATFORM)))
 SERVER_INCLUDES= -DSTANDALONE $(INCLUDES) -I../include
 SERVER_LIBS= -L../lib -lzdll -lenet -lws2_32 -lwinmm
+else ifeq ($(PLATFORM),Darwin)
+# macOS lacks unnamed POSIX semaphores, so the standalone server uses SDL threads there (see platform.h)
+SERVER_INCLUDES= -DSTANDALONE $(INCLUDES) `$(SDL2_CONFIG) --cflags`
+SERVER_LIBS= -L../enet/.libs -lenet -lz $(SDL2_LIBS)
 else
 SERVER_INCLUDES= -DSTANDALONE $(INCLUDES)
 # use with clang:v10.x
 #SERVER_LIBS= -L../enet/.libs -lenet -lz -lpthread
 # use with clang:v14.x
 SERVER_LIBS= -L../enet/.libs -lenet -lz -lpthread -fPIE
-ifeq (,$(findstring OpenBSD,$(PLATFORM)))
+ifeq (,$(findstring OpenBSD,$(PLATFORM))$(findstring Darwin,$(PLATFORM)))
 SERVER_LIBS+= -lrt
 endif
 endif
@@ -161,8 +189,21 @@ all: client server
 ../enet/Makefile:
 	cd ../enet; ./configure --enable-shared=no --enable-static=yes
 
+ifeq ($(PLATFORM),Darwin)
+# build the bundled ENet directly (no autotools needed); feature macros match what configure detects on macOS
+ENET_SRCS= callbacks.c compress.c host.c list.c packet.c peer.c protocol.c unix.c
+ENET_DEFS= -DHAS_POLL -DHAS_FCNTL -DHAS_INET_PTON -DHAS_INET_NTOP -DHAS_MSGHDR_FLAGS -DHAS_SOCKLEN_T
+
+libenet: ../enet/.libs/libenet.a
+
+../enet/.libs/libenet.a: $(addprefix ../enet/,$(ENET_SRCS))
+	mkdir -p ../enet/.libs
+	cd ../enet && for f in $(ENET_SRCS); do $(CC) -O2 $(ENET_CFLAGS) -Iinclude $(ENET_DEFS) -c $$f -o .libs/$${f%.c}.o || exit 1; done
+	$(AR) rcs $@ $(addprefix ../enet/.libs/,$(ENET_SRCS:.c=.o))
+else
 libenet: ../enet/Makefile
 	-$(MAKE) -C ../enet all
+endif
 
 clean-enet: ../enet/Makefile
 	$(MAKE) -C ../enet/ clean

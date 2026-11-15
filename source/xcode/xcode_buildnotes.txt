@@ -1,3 +1,7 @@
+NOTE (2026): this Xcode project is superseded by source/macos/make-app.sh, which builds a universal (Apple Silicon +
+Intel) AssaultCube.app for macOS 11+. The frameworks bundled here are Intel-only and the launcher is 32-bit.
+See source/macos/README.md.
+
 Tips for compiling AssaultCube in Xcode:
 
 1. For “assaultcube” scheme/target:

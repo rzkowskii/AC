@@ -52,3 +52,7 @@ logs/*
 private/*
 .DS_Store
 server_autoconfigured.bat
+
+# macOS app bundle build (source/macos/make-app.sh)
+source/macos/deps/
+source/macos/build/

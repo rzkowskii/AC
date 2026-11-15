@@ -27,3 +27,6 @@ JPEG license:                             source/include/README_jpeg.txt
 Vorbis/Ogg license:                       bin_win32/LICENSE.vorbis_ogg.txt
 OpenAL readme:                            bin_win32/readme_OpenAL.txt
 
+The macOS app (source/macos/make-app.sh) has no source or bin_win32 folder: the license texts of the libraries
+in it are in AssaultCube.app/Contents/Resources/licenses.
+

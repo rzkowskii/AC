@@ -56,9 +56,18 @@
     #include "GL/glext.h"
 
     #ifdef __APPLE__
-        #include "OpenAL/al.h"
-        #include "OpenAL/alc.h"
-        #include "Vorbis/vorbisfile.h"
+        #ifdef AC_OPENAL_SOFT
+            #include "AL/al.h"              // OpenAL Soft (bundled with the app, see source/macos/build-deps.sh)
+            #include "AL/alc.h"
+        #else
+            #include "OpenAL/al.h"          // Apple's (deprecated) OpenAL.framework
+            #include "OpenAL/alc.h"
+        #endif
+        #if defined(__has_include) && __has_include(<vorbis/vorbisfile.h>)
+            #include <vorbis/vorbisfile.h>  // libvorbis built from source, Homebrew, MacPorts
+        #else
+            #include "Vorbis/vorbisfile.h"  // legacy Vorbis.framework (Xcode project)
+        #endif
         #define MOD_KEYS_CTRL (KMOD_LGUI|KMOD_RGUI)
     #else
         #include "AL/al.h"

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Info.plist template for AssaultCube.app; make-app.sh replaces @VERSION@ -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>assaultcube</string>
+	<key>CFBundleIconFile</key>
+	<string>assaultcube</string>
+	<key>CFBundleIdentifier</key>
+	<string>net.cubers.assaultcube</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>AssaultCube</string>
+	<key>CFBundleDisplayName</key>
+	<string>AssaultCube</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<!-- marks the app as a game: macOS 14+ then turns on Game Mode in fullscreen (CPU/GPU priority, lower Bluetooth latency) -->
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.action-games</string>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>AssaultCube is free software. See the included README for licenses.</string>
+</dict>
+</plist>

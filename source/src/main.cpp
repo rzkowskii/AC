@@ -1529,8 +1529,39 @@ void sanitychecks()
 
 #define DEFAULTPROFILEPATH "profile"
 
+#ifdef __APPLE__
+#include <unistd.h>
+// When AssaultCube.app is started from Finder, the Dock or "open", the working directory is "/": switch to the game data
+// bundled in Contents/Resources. Returns true when running from an app bundle.
+static bool macbundlechdir()
+{
+    char *base = SDL_GetBasePath(); // ".../AssaultCube.app/Contents/Resources/" inside a bundle, the executable's directory otherwise
+    bool inbundle = base && strstr(base, ".app/Contents/Resources/") && !chdir(base);
+    if(base) SDL_free(base);
+    return inbundle;
+}
+
+// A bundle launch without --home/--init behaves like the old macOS launcher did ("--home=<user folder> --init"), with the
+// per-user folder named after the release like in assaultcube.sh/.bat: ~/Library/Application Support/assaultcube/v1.4
+static void macbundlehome(int argc, char **argv, bool &restoredinits)
+{
+    for(int i = 1; i < argc; i++) if(!strncmp(argv[i], "--home", 6) || !strncmp(argv[i], "--init", 6)) return;
+    const char *userhome = getenv("HOME");
+    if(!userhome || !*userhome) return;
+    defformatstring(parent)("%s/Library/Application Support/assaultcube", userhome);
+    createdir(parent);
+    defformatstring(userdir)("%s/v1.4", parent);
+    sethomedir(userdir);
+    execfile((char *)"config/init.cfg");
+    restoredinits = true;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#ifdef __APPLE__
+    const bool inmacbundle = macbundlechdir(); // before anything reads game data relative to the working directory
+#endif
     DEBUGCODE(sanitychecks());
     extern struct servercommandline scl;
     #ifdef WIN32
@@ -1573,6 +1604,9 @@ int main(int argc, char **argv)
 
     bool waitforauth = false;
     initing = INIT_RESET;
+#ifdef __APPLE__
+    if(inmacbundle) macbundlehome(argc, argv, restoredinits);
+#endif
     for(int i = 1; i<argc; i++)
     {
         clientlogf("parsing commandline argument %d: \"%s\"", i, argv[i]);
