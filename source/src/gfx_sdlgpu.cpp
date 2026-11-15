@@ -22,6 +22,8 @@ VAR(gpudebug, 0, 0, 1); // log every pipeline the GPU backend creates
 extern int benchnopresent;
 static void setframesinflight();
 VARF(gpuframes, 1, 2, 3, setframesinflight()); // frames the GPU backend lets the CPU queue ahead of the GPU
+static void setpresentmode();
+VARF(gpupresent, -1, -1, 2, setpresentmode()); // (testing) -1: from "vsync" (see displaychanged()), 0: immediate, 1: vsync, 2: mailbox
 
 // --- column-major 4x4 matrices, as GL computes them
 
@@ -379,6 +381,8 @@ struct sdlgpubackend : gfxdevice
         targetw(0), targeth(0), arenavb(NULL), arenaib(NULL), arenavbsize(0), arenaibsize(0), pickdownload(NULL),
         pickfence(NULL), pickpending(false), frameupload(NULL), frameuploadsize(0)
     {
+        wantvsync = -1;
+        presentmode = SDL_GPUPresentMode(-1);
         loopi(8) vshaders[i] = NULL;
         resetstate();
         textures.add(); // handle 0: no texture
@@ -434,17 +438,8 @@ struct sdlgpubackend : gfxdevice
             dev = NULL;
             return false;
         }
-        SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
-        if(vsync == 0)
-        {
-            if(SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_IMMEDIATE)) mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
-            else if(SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_MAILBOX)) mode = SDL_GPU_PRESENTMODE_MAILBOX;
-        }
-        if(!SDL_SetGPUSwapchainParameters(dev, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
-            conoutf("\f3SDL GPU: present mode %d not set: %s", int(mode), SDL_GetError());
-        conoutf("SDL GPU: vsync %d, present mode %s (immediate %s, mailbox %s)", vsync, mode == SDL_GPU_PRESENTMODE_VSYNC ? "vsync" : (mode == SDL_GPU_PRESENTMODE_IMMEDIATE ? "immediate" : "mailbox"),
-            SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_IMMEDIATE) ? "supported" : "not supported",
-            SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_MAILBOX) ? "supported" : "not supported");
+        wantvsync = vsync;
+        displaychanged();
         SDL_SetGPUAllowedFramesInFlight(dev, gpuframes);
 
         // depth: 32-bit float (Apple's GL gives 32 bits too), else 24-bit
@@ -488,6 +483,35 @@ struct sdlgpubackend : gfxdevice
 
         conoutf("renderer: SDL GPU (%s), %d bit depth, %dx multisampling", SDL_GetGPUDeviceDriver(dev), depthbits, samples);
         return true;
+    }
+
+    // How frames reach the display: with vsync unless "vsync 0" (then immediately, or mailbox where that's all there
+    // is). Measured on a 144 Hz display, with the window in front: vsync is paced to within 0.1 ms in a window and in
+    // fullscreen, while presenting immediately in a window misses refreshes (frames of 13 ms) because the compositor
+    // still shows one frame per refresh. "gpupresent" overrides the mode for testing.
+    int wantvsync;
+    SDL_GPUPresentMode presentmode;
+
+    void displaychanged()
+    {
+        if(!dev || !window) return;
+        bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+        SDL_GPUPresentMode mode = SDL_GPU_PRESENTMODE_VSYNC;
+        if(gpupresent >= 0) mode = SDL_GPUPresentMode(gpupresent == 0 ? SDL_GPU_PRESENTMODE_IMMEDIATE : (gpupresent == 1 ? SDL_GPU_PRESENTMODE_VSYNC : SDL_GPU_PRESENTMODE_MAILBOX));
+        else if(wantvsync == 0)
+        {
+            if(SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_IMMEDIATE)) mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+            else if(SDL_WindowSupportsGPUPresentMode(dev, window, SDL_GPU_PRESENTMODE_MAILBOX)) mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        }
+        if(mode == presentmode) return;
+        if(!SDL_SetGPUSwapchainParameters(dev, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+        {
+            conoutf("\f3SDL GPU: present mode %d not set: %s", int(mode), SDL_GetError());
+            return;
+        }
+        presentmode = mode;
+        clientlogf("SDL GPU: %s, vsync %d: presenting %s", fullscreen ? "fullscreen" : "window", wantvsync,
+            mode == SDL_GPU_PRESENTMODE_VSYNC ? "with vsync" : (mode == SDL_GPU_PRESENTMODE_IMMEDIATE ? "immediately" : "in mailbox mode"));
     }
 
     int getdepthbits() { return depthbits; }
@@ -1498,7 +1522,7 @@ struct sdlgpubackend : gfxdevice
         dt.texture = pick ? pickdepth : depthtex;
         dt.clear_depth = 1;
         dt.load_op = p.cleardepth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-        dt.store_op = SDL_GPU_STOREOP_STORE;
+        dt.store_op = SDL_GPU_STOREOP_STORE; // (not storing the last pass's depth measured no faster: 8 interleaved pairs)
         dt.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
         dt.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
         SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, &dt);
@@ -1651,6 +1675,7 @@ struct sdlgpubackend : gfxdevice
 
 static sdlgpubackend *sdlgpuinstance = NULL;
 static void setframesinflight() { if(sdlgpuinstance && sdlgpuinstance->dev) SDL_SetGPUAllowedFramesInFlight(sdlgpuinstance->dev, gpuframes); }
+static void setpresentmode() { if(sdlgpuinstance) sdlgpuinstance->displaychanged(); }
 gfxdevice *gfx_sdlgpu()
 {
     if(!sdlgpuinstance) sdlgpuinstance = new sdlgpubackend;

@@ -777,6 +777,7 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
         {
             gfx = gfx_sdlgpu();
             if(fullscreen) setfullscreenmode();
+            gfx->displaychanged();
             updatescreensize();
             inputgrab(grabinput = fullscreen ? true : false);
             useddepthbits = gfx->getdepthbits();
@@ -929,6 +930,8 @@ double hrclockms()
 // ("demo <name>; benchmark 60"), then prints average fps, 1%/0.1% lows and frame-time percentiles.
 // "benchmark 0" stops a running benchmark early and prints the result so far.
 static vector<float> benchframes;
+static double benchwaituntil = 0; // recording starts then (after raising the window)
+VAR(benchmarkdump, 0, 0, 1); // "benchmarkdump 1": the benchmark also writes every frame's time to the log, in order
 static double benchstart = -1, benchprev = -1;
 static int benchseconds = 0;
 static bool benchactive = false;
@@ -952,6 +955,15 @@ static void benchreport()
     if(n < 10) { conoutf("benchmark: not enough frames recorded (%d)", n); benchframes.setsize(0); return; }
     double total = 0;
     loopv(benchframes) total += benchframes[i];
+    if(benchmarkdump) // every frame's time in order, for looking at frame pacing
+    {
+        string line = "";
+        loopv(benchframes)
+        {
+            concatformatstring(line, "%s%.3f", *line ? " " : "", benchframes[i]);
+            if(strlen(line) > 200 || i == benchframes.length() - 1) { clientlogf("benchmark frames: %s", line); line[0] = '\0'; }
+        }
+    }
     benchframes.sort(benchcmp);
     extern int maxfps, vsync;
     conoutf("benchmark: %d frames in %.1f s: avg %.1f fps (%.3f ms), 1%% low %.1f fps, 0.1%% low %.1f fps",
@@ -1050,7 +1062,7 @@ static float benchspinyaw = 0;
 
 static void benchframe(double now) // called once per frame with the frame's start time
 {
-    if(!benchactive) return;
+    if(!benchactive || now < benchwaituntil) return;
     if(benchprev >= 0)
     {
         benchframes.add(float(now - benchprev));
@@ -1096,6 +1108,16 @@ void benchmark(int *seconds, int *spin)
     benchspinyaw = player1->yaw;
     benchactive = true;
     conoutf("benchmark: recording frame times for %d seconds%s", benchseconds, benchspin ? ", turning the camera through 360 degrees" : "");
+    // a window without focus can be composited at a lower rate (measured: 120 instead of 144 Hz for a Metal window):
+    // measure the window the way it's played, in front, once bringing it there has settled
+    benchwaituntil = 0;
+    if(screen && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS))
+    {
+        SDL_RaiseWindow(screen);
+        benchwaituntil = hrclockms() + 1000;
+    }
+    if(screen) clientlogf("benchmark: %s, %s, renderer %s", SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN ? "fullscreen" : "window",
+        SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS ? "focused" : "not focused", gfx->name());
 }
 COMMAND(benchmark, "ii");
 

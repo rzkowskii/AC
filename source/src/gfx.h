@@ -26,6 +26,7 @@ struct gfxdevice
     virtual int getdepthbits() { return 0; }
     virtual int getsamples() { return 0; }
     virtual void present() = 0;                                 // shows the frame (GL: SDL_GL_SwapWindow)
+    virtual void displaychanged() {}                            // re-applies the presentation settings (GPU backend)
     virtual void readpixels(int x, int y, int w, int h, GLenum format, GLenum type, void *data) = 0; // like glReadPixels
 
     // --- frame and targets
