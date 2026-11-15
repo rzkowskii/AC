@@ -14,6 +14,12 @@ const int dbgvlight = 0;
 
 VARP(mdldlist, 0, 1, 1);
 
+// With multisampling, alpha-tested skins (fences, foliage) also use alpha-to-coverage: their cut-out edges get the same
+// antialiasing as polygon edges. The alpha test itself stays, so what is solid and what is see-through doesn't change.
+extern bool alphacoverageactive();
+static inline void enablemodelalphatest()  { glEnable(GL_ALPHA_TEST); if(alphacoverageactive()) glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
+static inline void disablemodelalphatest() { glDisable(GL_ALPHA_TEST); glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
+
 vec modelpos;
 float modelroll, modelyaw, modelpitch;
 
@@ -450,14 +456,14 @@ struct vertmodel : model
                 if(enablealphablend) { glDisable(GL_BLEND); enablealphablend = false; }
                 if(skin->bpp == 32 && owner->model->alphatest > 0)
                 {
-                    if(!enablealphatest) { glEnable(GL_ALPHA_TEST); enablealphatest = true; }
+                    if(!enablealphatest) { enablemodelalphatest(); enablealphatest = true; }
                     if(lastalphatest != owner->model->alphatest)
                     {
                         glAlphaFunc(GL_GREATER, owner->model->alphatest);
                         lastalphatest = owner->model->alphatest;
                     }
                 }
-                else if(enablealphatest) { glDisable(GL_ALPHA_TEST); enablealphatest = false; }
+                else if(enablealphatest) { disablemodelalphatest(); enablealphatest = false; }
                 if(!enabledepthmask) { glDepthMask(GL_TRUE); enabledepthmask = true; }
             }
 
@@ -1142,7 +1148,7 @@ struct vertmodel : model
             }
 
             if(enabledepthmask) { glDepthMask(GL_FALSE); enabledepthmask = false; }
-            if(enablealphatest) { glDisable(GL_ALPHA_TEST); enablealphatest = false; }
+            if(enablealphatest) { disablemodelalphatest(); enablealphatest = false; }
             if(!enablealphablend)
             {
                 glEnable(GL_BLEND);
@@ -1306,7 +1312,7 @@ struct vertmodel : model
     void endrender()
     {
         if(enablealphablend) glDisable(GL_BLEND);
-        if(enablealphatest) glDisable(GL_ALPHA_TEST);
+        if(enablealphatest) disablemodelalphatest();
         if(!enabledepthmask) glDepthMask(GL_TRUE);
         if(lastvertexarray) glDisableClientState(GL_VERTEX_ARRAY);
         if(lasttexcoordarray) glDisableClientState(GL_TEXTURE_COORD_ARRAY);

@@ -202,9 +202,18 @@ extern bool hasDBF;
 // depth renderbuffer format matching the main depth buffer (offscreen passes then resolve depth exactly like it)
 int scenedepthformat() { return scenedepthbits >= 32 ? (hasDBF ? GL_DEPTH_COMPONENT32F : GL_DEPTH_COMPONENT32) : GL_DEPTH_COMPONENT24; }
 
+// "alphacoverage 1": with multisampling, alpha-tested model skins also use alpha-to-coverage (see vertmodel.h).
+// Off by default: texels that pass the alpha test with an alpha below 1 become partly see-through.
+VARP(alphacoverage, 0, 0, 1);
+static bool multisampled = false;
+bool alphacoverageactive() { return alphacoverage && multisampled; }
+
 void gl_init(int w, int h, int depth, int fsaa)
 {
     if(depth > 0) scenedepthbits = depth;
+    GLint samplebuffers = 0;
+    glGetIntegerv(GL_SAMPLE_BUFFERS, &samplebuffers);
+    multisampled = samplebuffers > 0;
     //#define fogvalues 0.5f, 0.6f, 0.7f, 1.0f
 
     glViewport(0, 0, w, h);
