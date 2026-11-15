@@ -992,9 +992,10 @@ struct sl_semaphore
     int getvalue();  // returns current semaphore value
     void post();     // increments (unlocks) semaphore
 };
-// set after SDL_Quit() at process exit: static semaphores are then left to the OS instead of being destroyed
-// (destroying SDL semaphores after SDL_Quit crashes with current SDL / sdl2-compat)
+// set when the process exits: static semaphores are then left to the OS instead of being destroyed. Destroying them
+// crashes with current SDL (after SDL_Quit) and while worker threads still wait on them (log, demo threads).
 extern bool sl_skipsemaphoredestroy;
+extern void sl_registerexithandler(); // call at the start of main(): sets sl_skipsemaphoredestroy before static destructors run
 
 extern void *sl_createthread(int (*fn)(void *), void *data, const char *name = NULL);
 extern int sl_waitthread(void *ti);

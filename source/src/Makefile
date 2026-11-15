@@ -189,10 +189,15 @@ all: client server
 ../enet/Makefile:
 	cd ../enet; ./configure --enable-shared=no --enable-static=yes
 
-ifeq ($(PLATFORM),Darwin)
-# build the bundled ENet directly (no autotools needed); feature macros match what configure detects on macOS
+ifneq (,$(filter Darwin Linux,$(PLATFORM)))
+# Build the bundled ENet directly, without its autotools build: no configure step, and no attempt to regenerate
+# autotools files whose timestamps a fresh git checkout leaves in arbitrary order. The feature macros match what
+# configure detects on macOS and on Linux (glibc, musl). Other systems use configure below.
 ENET_SRCS= callbacks.c compress.c host.c list.c packet.c peer.c protocol.c unix.c
 ENET_DEFS= -DHAS_POLL -DHAS_FCNTL -DHAS_INET_PTON -DHAS_INET_NTOP -DHAS_MSGHDR_FLAGS -DHAS_SOCKLEN_T
+ifeq ($(PLATFORM),Linux)
+ENET_DEFS+= -DHAS_GETHOSTBYNAME_R -DHAS_GETHOSTBYADDR_R
+endif
 
 libenet: ../enet/.libs/libenet.a
 

@@ -5549,6 +5549,7 @@ void fatal(const char *s, ...)
 
 int main(int argc, char **argv)
 {
+    sl_registerexithandler();
     #ifdef WIN32
     //atexit((void (__cdecl *)(void))_CrtDumpMemoryLeaks);
     #ifndef _DEBUG

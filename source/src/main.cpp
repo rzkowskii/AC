@@ -1629,6 +1629,7 @@ int main(int argc, char **argv)
     // coalesce its timers, which otherwise wake the frame limiter up late by a varying amount
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
 #endif
+    sl_registerexithandler();
     DEBUGCODE(sanitychecks());
     extern struct servercommandline scl;
     #ifdef WIN32

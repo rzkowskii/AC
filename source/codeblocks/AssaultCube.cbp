@@ -38,7 +38,6 @@
 					<Add library="SDL2_image" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
-					<Add library="enet" />
 					<Add library="OpenAL32" />
 					<Add library="vorbisfile" />
 					<Add library="jpeg" />
@@ -72,7 +71,6 @@
 					<Add library="SDL2_image" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
-					<Add library="enet" />
 					<Add library="OpenAL32" />
 					<Add library="vorbisfile" />
 					<Add library="jpeg" />
@@ -103,7 +101,6 @@
 				<Linker>
 					<Add library="SDL2" />
 					<Add library="zdll" />
-					<Add library="enet" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
 					<Add directory="../lib" />
@@ -132,7 +129,6 @@
 				<Linker>
 					<Add library="SDL2" />
 					<Add library="zdll" />
-					<Add library="enet" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
 					<Add directory="../lib" />
@@ -158,7 +154,6 @@
 				</ResourceCompiler>
 				<Linker>
 					<Add library="zdll" />
-					<Add library="enet" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
 					<Add directory="../lib" />
@@ -409,6 +404,30 @@
 		<Unit filename="../src/rendercubes.cpp">
 			<Option target="default" />
 			<Option target="debug" />
+		</Unit>
+		<Unit filename="../enet/callbacks.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/compress.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/host.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/list.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/packet.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/peer.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/protocol.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../enet/win32.c">
+			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="../src/rendergl.cpp">
 			<Option target="default" />

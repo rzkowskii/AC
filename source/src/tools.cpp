@@ -729,6 +729,10 @@ bool glmatrixf::invert(const glmatrixf &m, float mindet)
 
 static int sl_sem_errorcountdummy = 0;
 bool sl_skipsemaphoredestroy = false;
+static void sl_exithandler() { sl_skipsemaphoredestroy = true; }
+// exit() runs handlers registered with atexit() in main() before the destructors of static objects (registered earlier,
+// during static initialisation), so this covers every way the process ends: quit, Ctrl-C, fatal errors
+void sl_registerexithandler() { atexit(sl_exithandler); }
 
 #ifdef AC_USE_SDL_THREADS
 sl_semaphore::sl_semaphore(int init, int *ecnt)

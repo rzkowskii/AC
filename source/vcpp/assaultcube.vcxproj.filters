@@ -1,6 +1,9 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="enet">
+      <UniqueIdentifier>{5c2c7d6a-6a3b-4c9e-9a51-0e1e5f0f2a31}</UniqueIdentifier>
+    </Filter>
     <Filter Include="headers">
       <UniqueIdentifier>{2532c794-cb61-4d6c-bee5-ad73abfac21a}</UniqueIdentifier>
       <Extensions>h;hpp;hxx;hm;inl</Extensions>
@@ -229,6 +232,30 @@
   <ItemGroup>
     <ClCompile Include="..\src\rendercubes.cpp">
       <Filter>render</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\callbacks.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\compress.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\host.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\list.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\packet.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\peer.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\protocol.c">
+      <Filter>enet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\enet\win32.c">
+      <Filter>enet</Filter>
     </ClCompile>
     <ClCompile Include="..\src\rendergl.cpp">
       <Filter>render</Filter>
