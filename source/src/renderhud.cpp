@@ -95,10 +95,10 @@ void drawmyidenticon()
             {
                 if(myidentity.tex->id)
                 {
-                    glPushMatrix();
-                    glDisable(GL_BLEND);
-                    glEnable(GL_TEXTURE_2D);
-                    glLoadIdentity();
+                    gfx->pushmatrix();
+                    gfx->disable(GL_BLEND);
+                    gfx->enable(GL_TEXTURE_2D);
+                    gfx->loadidentity();
                     const int vw = VIRTW/4;
                     const int vh = VIRTH/4;
                     int offx = 72;
@@ -116,10 +116,10 @@ void drawmyidenticon()
                         }
                     }
                     offy = -64 + 150 * movy;
-                    glOrtho(0, vw, vh, 0, -1, 1);
+                    gfx->ortho(0, vw, vh, 0, -1, 1);
                     quad(myidentity.tex->id, vw-offx, vh-offy, 64, 0, 0, 1);
-                    glEnable(GL_BLEND);
-                    glPopMatrix();
+                    gfx->enable(GL_BLEND);
+                    gfx->popmatrix();
                 }else{
                     myidentity.joined = 0;
                 }
@@ -171,11 +171,11 @@ void drawotheridenticons()
     }
     if(needrender)
     {
-        glPushMatrix();
-        glDisable(GL_BLEND);
-        glEnable(GL_TEXTURE_2D);
-        glLoadIdentity();
-        glOrtho(0, VIRTW, VIRTH, 0, -1, 1);
+        gfx->pushmatrix();
+        gfx->disable(GL_BLEND);
+        gfx->enable(GL_TEXTURE_2D);
+        gfx->loadidentity();
+        gfx->ortho(0, VIRTW, VIRTH, 0, -1, 1);
         int toffy = 448; // below radar and so shouldn't overlap (m)any console messages either
         int rowdi = 0; // offset i by this for additional rows
 
@@ -196,8 +196,8 @@ void drawotheridenticons()
                 }
             }
         }
-        glEnable(GL_BLEND);
-        glPopMatrix();
+        gfx->enable(GL_BLEND);
+        gfx->popmatrix();
     }
 
 }

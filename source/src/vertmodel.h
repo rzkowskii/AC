@@ -20,8 +20,8 @@ VARP(mdlvbo, 0, 1, 1);
 // With multisampling, alpha-tested skins (fences, foliage) also use alpha-to-coverage: their cut-out edges get the same
 // antialiasing as polygon edges. The alpha test itself stays, so what is solid and what is see-through doesn't change.
 extern bool alphacoverageactive();
-static inline void enablemodelalphatest()  { glEnable(GL_ALPHA_TEST); if(alphacoverageactive()) glEnable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
-static inline void disablemodelalphatest() { glDisable(GL_ALPHA_TEST); glDisable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
+static inline void enablemodelalphatest()  { gfx->enable(GL_ALPHA_TEST); if(alphacoverageactive()) gfx->enable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
+static inline void disablemodelalphatest() { gfx->disable(GL_ALPHA_TEST); gfx->disable(GL_SAMPLE_ALPHA_TO_COVERAGE); }
 
 vec modelpos;
 float modelroll, modelyaw, modelpitch;
@@ -301,8 +301,8 @@ struct vertmodel : model
 
         void deletestatbuffers()
         {
-            if(statvbo) glDeleteBuffers_(1, &statvbo);
-            if(statibo) glDeleteBuffers_(1, &statibo);
+            if(statvbo) gfx->deletebuffers(1, &statvbo);
+            if(statibo) gfx->deletebuffers(1, &statibo);
             statvbo = statibo = 0;
         }
 
@@ -321,49 +321,49 @@ struct vertmodel : model
         {
             if(!statvbo)
             {
-                glGenBuffers_(1, &statvbo);
-                glGenBuffers_(1, &statibo);
-                glBindBuffer_(GL_ARRAY_BUFFER_ARB, statvbo);
-                glBufferData_(GL_ARRAY_BUFFER_ARB, numverts*(sizeof(vec) + sizeof(tcvert)), NULL, GL_STATIC_DRAW_ARB);
-                glBufferSubData_(GL_ARRAY_BUFFER_ARB, 0, numverts*sizeof(vec), verts);
-                glBufferSubData_(GL_ARRAY_BUFFER_ARB, numverts*sizeof(vec), numverts*sizeof(tcvert), tcverts);
-                glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
-                glBufferData_(GL_ELEMENT_ARRAY_BUFFER_ARB, dynlen*sizeof(ushort), dynidx, GL_STATIC_DRAW_ARB);
+                gfx->genbuffers(1, &statvbo);
+                gfx->genbuffers(1, &statibo);
+                gfx->bindbuffer(GL_ARRAY_BUFFER_ARB, statvbo);
+                gfx->bufferdata(GL_ARRAY_BUFFER_ARB, numverts*(sizeof(vec) + sizeof(tcvert)), NULL, GL_STATIC_DRAW_ARB);
+                gfx->buffersubdata(GL_ARRAY_BUFFER_ARB, 0, numverts*sizeof(vec), verts);
+                gfx->buffersubdata(GL_ARRAY_BUFFER_ARB, numverts*sizeof(vec), numverts*sizeof(tcvert), tcverts);
+                gfx->bindbuffer(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
+                gfx->bufferdata(GL_ELEMENT_ARRAY_BUFFER_ARB, dynlen*sizeof(ushort), dynidx, GL_STATIC_DRAW_ARB);
             }
             else
             {
-                glBindBuffer_(GL_ARRAY_BUFFER_ARB, statvbo);
-                glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
+                gfx->bindbuffer(GL_ARRAY_BUFFER_ARB, statvbo);
+                gfx->bindbuffer(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
             }
             // the array pointers refer to the buffer (lastvertexarray etc. get values no client array can have)
             if(lastvertexarray != &statvbo)
             {
-                if(!lastvertexarray) glEnableClientState(GL_VERTEX_ARRAY);
-                glVertexPointer(3, GL_FLOAT, sizeof(vec), (const void *)0);
+                if(!lastvertexarray) gfx->enableclientstate(GL_VERTEX_ARRAY);
+                gfx->vertexpointer(3, GL_FLOAT, sizeof(vec), (const void *)0);
                 lastvertexarray = &statvbo;
             }
             if(lasttexcoordarray != &statibo)
             {
-                if(!lasttexcoordarray) glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-                glTexCoordPointer(2, GL_FLOAT, sizeof(tcvert), (const void *)(uintptr_t)(numverts*sizeof(vec)));
+                if(!lasttexcoordarray) gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+                gfx->texcoordpointer(2, GL_FLOAT, sizeof(tcvert), (const void *)(uintptr_t)(numverts*sizeof(vec)));
                 lasttexcoordarray = &statibo;
             }
             if(lastcolorarray)
             {
-                glDisableClientState(GL_COLOR_ARRAY);
+                gfx->disableclientstate(GL_COLOR_ARRAY);
                 lastcolorarray = NULL;
             }
-            glBindBuffer_(GL_ARRAY_BUFFER_ARB, 0);
+            gfx->bindbuffer(GL_ARRAY_BUFFER_ARB, 0);
             bool shader = beginworldshader();
             loopi(numdyndraws)
             {
                 const drawcall &d = dyndraws[i];
                 const void *idx = (const void *)(uintptr_t)(d.start*sizeof(ushort));
-                if(hasDRE) glDrawRangeElements_(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, idx);
-                else glDrawElements(d.type, d.count, GL_UNSIGNED_SHORT, idx);
+                if(hasDRE) gfx->drawrangeelements(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, idx);
+                else gfx->drawelements(d.type, d.count, GL_UNSIGNED_SHORT, idx);
             }
             if(shader) endworldshader();
-            glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
+            gfx->bindbuffer(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
             xtraverts += dynlen;
             return true;
         }
@@ -515,21 +515,21 @@ struct vertmodel : model
                 if(tex > 0) id = lookuptexture(tex)->id;
                 if(id != lasttex)
                 {
-                    glBindTexture(GL_TEXTURE_2D, id);
+                    gfx->bindtexture(GL_TEXTURE_2D, id);
                     lasttex = id;
                 }
-                if(enablealphablend) { glDisable(GL_BLEND); enablealphablend = false; }
+                if(enablealphablend) { gfx->disable(GL_BLEND); enablealphablend = false; }
                 if(skin->bpp == 32 && owner->model->alphatest > 0)
                 {
                     if(!enablealphatest) { enablemodelalphatest(); enablealphatest = true; }
                     if(lastalphatest != owner->model->alphatest)
                     {
-                        glAlphaFunc(GL_GREATER, owner->model->alphatest);
+                        gfx->alphafunc(GL_GREATER, owner->model->alphatest);
                         lastalphatest = owner->model->alphatest;
                     }
                 }
                 else if(enablealphatest) { disablemodelalphatest(); enablealphatest = false; }
-                if(!enabledepthmask) { glDepthMask(GL_TRUE); enabledepthmask = true; }
+                if(!enabledepthmask) { gfx->depthmask(GL_TRUE); enabledepthmask = true; }
             }
 
             if(enableoffset)
@@ -571,8 +571,8 @@ struct vertmodel : model
             }
             if(lastvertexarray != buf)
             {
-                if(!lastvertexarray) glEnableClientState(GL_VERTEX_ARRAY);
-                glVertexPointer(3, GL_FLOAT, sizeof(vec), buf);
+                if(!lastvertexarray) gfx->enableclientstate(GL_VERTEX_ARRAY);
+                gfx->vertexpointer(3, GL_FLOAT, sizeof(vec), buf);
                 lastvertexarray = buf;
             }
             lightvert *vlight = NULL;
@@ -580,7 +580,7 @@ struct vertmodel : model
             {
                 if(lasttexcoordarray)
                 {
-                    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+                    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
                     lasttexcoordarray = NULL;
                 }
             }
@@ -588,8 +588,8 @@ struct vertmodel : model
             {
                 if(lasttexcoordarray != tcverts)
                 {
-                    if(!lasttexcoordarray) glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-                    glTexCoordPointer(2, GL_FLOAT, sizeof(tcvert), tcverts);
+                    if(!lasttexcoordarray) gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+                    gfx->texcoordpointer(2, GL_FLOAT, sizeof(tcvert), tcverts);
                     lasttexcoordarray = tcverts;
                 }
                 if(owner->model->vertexlight)
@@ -604,10 +604,10 @@ struct vertmodel : model
             {
                 if(vlight)
                 {
-                    if(!lastcolorarray) glEnableClientState(GL_COLOR_ARRAY);
-                    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(lightvert), vlight);
+                    if(!lastcolorarray) gfx->enableclientstate(GL_COLOR_ARRAY);
+                    gfx->colorpointer(4, GL_UNSIGNED_BYTE, sizeof(lightvert), vlight);
                 }
-                else glDisableClientState(GL_COLOR_ARRAY);
+                else gfx->disableclientstate(GL_COLOR_ARRAY);
                 lastcolorarray = vlight;
             }
             if(stenciling)
@@ -617,19 +617,19 @@ struct vertmodel : model
                 if(d) d->locked = false;
                 if(!s) return;
                 buf[numverts] = s->dir;
-                glDrawElements(GL_TRIANGLES, s->numidxs(), GL_UNSIGNED_SHORT, s->idxs());
+                gfx->drawelements(GL_TRIANGLES, s->numidxs(), GL_UNSIGNED_SHORT, s->idxs());
                 xtraverts += s->numidxs();
                 return;
             }
 
-            bool builddlist = isstat && !owner->model->vertexlight && mdldlist;
+            bool builddlist = isstat && !owner->model->vertexlight && mdldlist && gfx_legacygl(); // display lists: GL only
             if(builddlist) glNewList(statlist = glGenLists(1), GL_COMPILE);
             bool shader = !builddlist && beginworldshader();
             loopi(numdyndraws)
             {
                 const drawcall &d = dyndraws[i];
-                if(hasDRE && !builddlist) glDrawRangeElements_(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
-                else glDrawElements(d.type, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
+                if(hasDRE && !builddlist) gfx->drawrangeelements(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
+                else gfx->drawelements(d.type, d.count, GL_UNSIGNED_SHORT, &dynidx[d.start]);
             }
             if(shader) endworldshader();
             if(builddlist)
@@ -764,7 +764,7 @@ struct vertmodel : model
             DELETEA(anims);
             DELETEA(links);
             DELETEA(tags);
-            if(shadows) glDeleteTextures(numframes, shadows);
+            if(shadows) gfx->deletetextures(numframes, shadows);
             DELETEA(shadows);
         }
 
@@ -773,7 +773,7 @@ struct vertmodel : model
             loopv(meshes) meshes[i]->cleanup();
             if(shadows)
             {
-                glDeleteTextures(numframes, shadows);
+                gfx->deletetextures(numframes, shadows);
                 DELETEA(shadows);
             }
         }
@@ -972,10 +972,10 @@ struct vertmodel : model
                 ai_t = (lastmillis-d->lastanimswitchtime[index])/(float)animationinterpolationtime;
             }
 
-            glPushMatrix();
-            glMultMatrixf(matrixstack[matrixpos].v);
+            gfx->pushmatrix();
+            gfx->multmatrix(matrixstack[matrixpos].v);
             loopv(meshes) meshes[i]->render(as, cur, doai ? &prev : NULL, ai_t);
-            glPopMatrix();
+            gfx->popmatrix();
 
             loopi(numtags)
             {
@@ -1198,7 +1198,7 @@ struct vertmodel : model
 
             shadowrad = hdr.rad;
             shadows = new GLuint[hdr.frames];
-            glGenTextures(hdr.frames, shadows);
+            gfx->gentextures(hdr.frames, shadows);
 
             loopi(hdr.frames) createtexture(shadows[i], hdr.size, hdr.size, &buf[i*hdr.size*hdr.size], 3, true, false, GL_ALPHA);
 
@@ -1219,16 +1219,16 @@ struct vertmodel : model
             GLuint id = shadows[cur.fr1];
             if(id!=lasttex)
             {
-                glBindTexture(GL_TEXTURE_2D, id);
+                gfx->bindtexture(GL_TEXTURE_2D, id);
                 lasttex = id;
             }
 
-            if(enabledepthmask) { glDepthMask(GL_FALSE); enabledepthmask = false; }
+            if(enabledepthmask) { gfx->depthmask(GL_FALSE); enabledepthmask = false; }
             if(enablealphatest) { disablemodelalphatest(); enablealphatest = false; }
             if(!enablealphablend)
             {
-                glEnable(GL_BLEND);
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                gfx->enable(GL_BLEND);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
                 enablealphablend = true;
             }
 
@@ -1239,12 +1239,12 @@ struct vertmodel : model
 
             if(dynshadowquad)
             {
-                glBegin(GL_QUADS);
-                glTexCoord2f(0, 1); glVertex3f(x1*c - y1*s + o.x, y1*c + x1*s + o.y, o.z);
-                glTexCoord2f(1, 1); glVertex3f(x2*c - y1*s + o.x, y1*c + x2*s + o.y, o.z);
-                glTexCoord2f(1, 0); glVertex3f(x2*c - y2*s + o.x, y2*c + x2*s + o.y, o.z);
-                glTexCoord2f(0, 0); glVertex3f(x1*c - y2*s + o.x, y2*c + x1*s + o.y, o.z);
-                glEnd();
+                gfx->begin(GL_QUADS);
+                gfx->texcoord2f(0, 1); gfx->vertex3f(x1*c - y1*s + o.x, y1*c + x1*s + o.y, o.z);
+                gfx->texcoord2f(1, 1); gfx->vertex3f(x2*c - y1*s + o.x, y1*c + x2*s + o.y, o.z);
+                gfx->texcoord2f(1, 0); gfx->vertex3f(x2*c - y2*s + o.x, y2*c + x2*s + o.y, o.z);
+                gfx->texcoord2f(0, 0); gfx->vertex3f(x1*c - y2*s + o.x, y2*c + x1*s + o.y, o.z);
+                gfx->end();
                 xtraverts += 4;
                 return;
             }
@@ -1256,12 +1256,12 @@ struct vertmodel : model
             }
             if(lastvertexarray)
             {
-                glDisableClientState(GL_VERTEX_ARRAY);
+                gfx->disableclientstate(GL_VERTEX_ARRAY);
                 lastvertexarray = NULL;
             }
             if(lasttexcoordarray)
             {
-                glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+                gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
                 lasttexcoordarray = NULL;
             }
 
@@ -1387,12 +1387,12 @@ struct vertmodel : model
 
     void endrender()
     {
-        if(enablealphablend) glDisable(GL_BLEND);
+        if(enablealphablend) gfx->disable(GL_BLEND);
         if(enablealphatest) disablemodelalphatest();
-        if(!enabledepthmask) glDepthMask(GL_TRUE);
-        if(lastvertexarray) glDisableClientState(GL_VERTEX_ARRAY);
-        if(lasttexcoordarray) glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-        if(lastcolorarray) glDisableClientState(GL_COLOR_ARRAY);
+        if(!enabledepthmask) gfx->depthmask(GL_TRUE);
+        if(lastvertexarray) gfx->disableclientstate(GL_VERTEX_ARRAY);
+        if(lasttexcoordarray) gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
+        if(lastcolorarray) gfx->disableclientstate(GL_COLOR_ARRAY);
         if(enableoffset) disablepolygonoffset(GL_POLYGON_OFFSET_FILL);
     }
 

@@ -13,6 +13,7 @@
 #include "command.h"
 
 #ifndef STANDALONE
+ #include "gfx.h"
  #include "varray.h"
  #include "vote.h"
  #include "console.h"

@@ -250,32 +250,32 @@ void enablepolygonoffset(GLenum type)
 {
     if(!depthoffset)
     {
-        glPolygonOffset(polygonoffsetfactor, polygonoffsetunits);
-        glEnable(type);
+        gfx->polygonoffset(polygonoffsetfactor, polygonoffsetunits);
+        gfx->enable(type);
         return;
     }
 
     glmatrixf offsetmatrix = reflecting ? clipmatrix : projmatrix;
     offsetmatrix[14] += depthoffset * projmatrix[10];
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadMatrixf(offsetmatrix.v);
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->loadmatrix(offsetmatrix.v);
+    gfx->matrixmode(GL_MODELVIEW);
 }
 
 void disablepolygonoffset(GLenum type, bool restore)
 {
     if(!depthoffset)
     {
-        glDisable(type);
+        gfx->disable(type);
         return;
     }
 
     if(restore)
     {
-        glMatrixMode(GL_PROJECTION);
-        glLoadMatrixf(reflecting ? clipmatrix.v : projmatrix.v);
-        glMatrixMode(GL_MODELVIEW);
+        gfx->matrixmode(GL_PROJECTION);
+        gfx->loadmatrix(reflecting ? clipmatrix.v : projmatrix.v);
+        gfx->matrixmode(GL_MODELVIEW);
     }
 }
 
@@ -690,17 +690,17 @@ void recomputecamera()
 
 void transplayer()
 {
-    glLoadIdentity();
+    gfx->loadidentity();
 
-    glRotatef(camera1->roll, 0, 0, 1);
-    glRotatef(camera1->pitch, -1, 0, 0);
-    glRotatef(camera1->yaw, 0, 1, 0);
+    gfx->rotate(camera1->roll, 0, 0, 1);
+    gfx->rotate(camera1->pitch, -1, 0, 0);
+    gfx->rotate(camera1->yaw, 0, 1, 0);
 
     // move from RH to Z-up LH quake style worldspace
-    glRotatef(-90, 1, 0, 0);
-    glScalef(1, -1, 1);
+    gfx->rotate(-90, 1, 0, 0);
+    gfx->scale(1, -1, 1);
 
-    glTranslatef(-camera1->o.x, -camera1->o.y, -camera1->o.z);
+    gfx->translate(-camera1->o.x, -camera1->o.y, -camera1->o.z);
 }
 
 glmatrixf clipmatrix;
@@ -1087,25 +1087,25 @@ void setperspective(float fovy, float aspect, float nearplane, float farplane)
         int gdim = max(clmapdims.xspan, clmapdims.yspan);
         if(!gdim) gdim = ssize/2;
         int orthd = 2 + gdim/2;
-        glOrtho(-orthd, orthd, -orthd, orthd, 0, (clmapdims.maxceil - clmapdims.minfloor) + 2); // depth of map +2 covered
+        gfx->ortho(-orthd, orthd, -orthd, orthd, 0, (clmapdims.maxceil - clmapdims.minfloor) + 2); // depth of map +2 covered
     }
     else
     {
-        glFrustum(-xdist, xdist, -ydist, ydist, nearplane, farplane);
+        gfx->frustum(-xdist, xdist, -ydist, ydist, nearplane, farplane);
     }
 }
 
 void sethudgunperspective(bool on)
 {
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->loadidentity();
     if(on)
     {
-        glScalef(1, 1, 0.5f); // fix hudugns colliding with map geometry
+        gfx->scale(1, 1, 0.5f); // fix hudugns colliding with map geometry
         setperspective(75.0f, aspect, 0.3f, farplane); // y fov fixed at 75 degrees
     }
     else setperspective(fovy, aspect, 0.15f, farplane);
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_MODELVIEW);
 }
 
 void drawhudgun()
@@ -1137,8 +1137,8 @@ vec worldpos, camdir, camup, camright;
 
 void readmatrices()
 {
-    glGetFloatv(GL_MODELVIEW_MATRIX, mvmatrix.v);
-    glGetFloatv(GL_PROJECTION_MATRIX, projmatrix.v);
+    gfx->getfloatv(GL_MODELVIEW_MATRIX, mvmatrix.v);
+    gfx->getfloatv(GL_PROJECTION_MATRIX, projmatrix.v);
     camright = vec(mvmatrix[0], mvmatrix[4], mvmatrix[8]);
     camup = vec(mvmatrix[1], mvmatrix[5], mvmatrix[9]);
     camdir = vec(-mvmatrix[2], -mvmatrix[6], -mvmatrix[10]);
@@ -1180,7 +1180,6 @@ static void depthtoworldpos(float depth, const glmatrixf &invmvp, const vec &fro
 // the name of the player in the crosshair), which see the value from one frame earlier. In edit mode, where the edit
 // cursor needs the current frame, the read stays synchronous. "asyncdepth 0" restores the synchronous read.
 VAR(asyncdepth, 0, 1, 1);
-static GLuint depthpbo = 0;
 static bool depthpending = false, depthinpbo = false;
 static glmatrixf depthinvmvp;
 static vec depthfrom;
@@ -1192,7 +1191,6 @@ static vec depthfrom;
 // geometry a second time, and with a frame rate cap the GPU has finished the frame by the time the depth is read.
 // "depthpick 0" restores reading the main pass's depth in the middle of the frame.
 VAR(depthpick, 0, 1, 1);
-static GLuint pickfbo = 0, pickrb[2] = { 0, 0 };
 static bool pickdrawn = false; // the pick pass ran this frame: readdepth() has nothing to do
 
 // "depthcheck 1" (debugging): also reads the main pass's depth in the middle of the frame (the old way) and compares the
@@ -1209,19 +1207,9 @@ void resolvedepth() // called at the start of a frame, before input and game upd
     float d = 1;
     if(depthinpbo)
     {
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
-        const float *depth = (const float *)glMapBuffer_(GL_PIXEL_PACK_BUFFER_ARB, GL_READ_ONLY);
-        if(depth) { d = *depth; glUnmapBuffer_(GL_PIXEL_PACK_BUFFER_ARB); }
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
-        if(!depth) return;
+        if(!gfx->resolvedepthasync(d)) return;
     }
-    else if(pickfbo)
-    {
-        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
-        glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &d);
-        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
-    }
-    else return;
+    else if(!gfx->readpick(d)) return;
     depthtoworldpos(d, depthinvmvp, depthfrom, worldpos);
     if(depthcheck)
     {
@@ -1235,69 +1223,17 @@ void resolvedepth() // called at the start of a frame, before input and game upd
     }
 }
 
-static void cleanuppick()
-{
-    if(pickfbo) glDeleteFramebuffers_(1, &pickfbo);
-    if(pickrb[0]) glDeleteRenderbuffers_(2, pickrb);
-    pickfbo = pickrb[0] = pickrb[1] = 0;
-    pickdrawn = false;
-}
-
 static void cleanupdepthread()
 {
-    if(depthpbo) glDeleteBuffers_(1, &depthpbo);
-    depthpbo = 0;
+    gfx->cleanuppick();
     depthpending = depthinpbo = false;
-    cleanuppick();
-}
-
-#ifndef GL_DEPTH_COMPONENT32F
-#define GL_DEPTH_COMPONENT32F 0x8CAC
-#endif
-
-static bool setuppick()
-{
-    if(pickfbo) return true;
-    // same depth precision as the main depth buffer; try the closest formats first
-    GLenum formats[3];
-    int numformats = 0;
-    if(scenedepthbits >= 32)
-    {
-        if(hasDBF) formats[numformats++] = GL_DEPTH_COMPONENT32F;
-        formats[numformats++] = GL_DEPTH_COMPONENT32;
-    }
-    formats[numformats++] = GL_DEPTH_COMPONENT24;
-    GLenum status = 0;
-    loopi(numformats)
-    {
-        glGenRenderbuffers_(2, pickrb);
-        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, pickrb[0]);
-        glRenderbufferStorage_(GL_RENDERBUFFER_EXT, GL_RGBA8, 1, 1);
-        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, pickrb[1]);
-        glRenderbufferStorage_(GL_RENDERBUFFER_EXT, formats[i], 1, 1);
-        glBindRenderbuffer_(GL_RENDERBUFFER_EXT, 0);
-        glGenFramebuffers_(1, &pickfbo);
-        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
-        glFramebufferRenderbuffer_(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_RENDERBUFFER_EXT, pickrb[0]);
-        glFramebufferRenderbuffer_(GL_FRAMEBUFFER_EXT, GL_DEPTH_ATTACHMENT_EXT, GL_RENDERBUFFER_EXT, pickrb[1]);
-        status = glCheckFramebufferStatus_(GL_FRAMEBUFFER_EXT);
-        glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
-        if(status == GL_FRAMEBUFFER_COMPLETE_EXT) return true;
-        cleanuppick();
-    }
-    conoutf("crosshair pick buffer not supported (0x%X): reading the depth in the middle of the frame instead", status);
-    depthpick = 0;
-    return false;
+    pickdrawn = false;
 }
 
 static void renderdepthpick(int w, int h)
 {
     pickdrawn = false;
-    if(!setuppick()) return;
-    glBindFramebuffer_(GL_FRAMEBUFFER_EXT, pickfbo);
-    glViewport(0, 0, 1, 1);
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    if(!gfx->beginpick(scenedepthbits)) { depthpick = 0; return; }
 
     // projection zoomed onto the crosshair pixel (w/2, h/2), the pixel the main pass's depth used to be read from:
     // that pixel's footprint is mapped onto the 1x1 viewport, so its centre is sampled at the same point of the view
@@ -1308,18 +1244,18 @@ static void renderdepthpick(int w, int h)
     zoom.v[5] = h;
     zoom.v[12] = w - 2*px - 1;
     zoom.v[13] = h - 2*py - 1;
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadMatrixf(zoom.v);
-    glMultMatrixf(projmatrix.v);
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->pushmatrix();
+    gfx->loadmatrix(zoom.v);
+    gfx->multmatrix(projmatrix.v);
+    gfx->matrixmode(GL_MODELVIEW);
     transplayer();
 
     // what the main pass has drawn when the old code read its depth: sky cubes and world (the sky box doesn't write depth)...
-    glDisable(GL_TEXTURE_2D);
+    gfx->disable(GL_TEXTURE_2D);
     setupstrips();
     renderstripsdepth();
-    glEnable(GL_TEXTURE_2D);
+    gfx->enable(GL_TEXTURE_2D);
     // ...and map models, with their textures for alpha-tested skins (blob shadows don't write depth: skipped). Only the
     // models whose bounding sphere the ray through the crosshair pixel's centre passes through can affect its depth.
     vec4 nearw, farw;
@@ -1334,27 +1270,14 @@ static void renderdepthpick(int w, int h)
     rendermapmodelsalongray(raynear, raydir);
     endmodelbatches();
     dynshadow = keepdynshadow;
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-    depthinpbo = asyncdepth && hasPBO;
-    if(depthinpbo) // on drivers that read asynchronously, start copying the result right away
-    {
-        if(!depthpbo)
-        {
-            glGenBuffers_(1, &depthpbo);
-            glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
-            glBufferData_(GL_PIXEL_PACK_BUFFER_ARB, sizeof(float), NULL, GL_STREAM_READ);
-        }
-        else glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
-        glReadPixels(0, 0, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
-    }
+    depthinpbo = asyncdepth && hasPBO; // on drivers that read asynchronously, start copying the result right away
+    gfx->endpick(depthinpbo);
 
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glBindFramebuffer_(GL_FRAMEBUFFER_EXT, 0);
-    glViewport(0, 0, w, h);
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->popmatrix();
+    gfx->matrixmode(GL_MODELVIEW);
+    gfx->viewport(0, 0, w, h);
 
     depthinvmvp = invmvpmatrix;
     depthfrom = camera1->o;
@@ -1369,30 +1292,21 @@ void readdepth(int w, int h, vec &pos)
         if(depthcheck)
         {
             float syncdepth, keepcursordepth = cursordepth;
-            glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &syncdepth);
+            gfx->readdepth(w/2, h/2, syncdepth);
             depthtoworldpos(syncdepth, invmvpmatrix, camera1->o, depthcheckpos);
             cursordepth = keepcursordepth;
         }
         return;
     }
-    if(asyncdepth && hasPBO && !editmode && &pos == &worldpos)
+    if(asyncdepth && hasPBO && !editmode && &pos == &worldpos && gfx->readdepthasync(w/2, h/2))
     {
-        if(!depthpbo)
-        {
-            glGenBuffers_(1, &depthpbo);
-            glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
-            glBufferData_(GL_PIXEL_PACK_BUFFER_ARB, sizeof(float), NULL, GL_STREAM_READ);
-        }
-        else glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, depthpbo);
-        glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, NULL); // into the buffer object: returns without waiting
-        glBindBuffer_(GL_PIXEL_PACK_BUFFER_ARB, 0);
         depthinvmvp = invmvpmatrix;
         depthfrom = camera1->o;
         depthpending = depthinpbo = true;
         if(depthcheck)
         {
             float syncdepth, keepcursordepth = cursordepth;
-            glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &syncdepth);
+            gfx->readdepth(w/2, h/2, syncdepth);
             depthtoworldpos(syncdepth, invmvpmatrix, camera1->o, depthcheckpos);
             cursordepth = keepcursordepth;
         }
@@ -1400,7 +1314,7 @@ void readdepth(int w, int h, vec &pos)
     }
     depthpending = false; // a synchronous read supersedes a pending one
     float depth;
-    glReadPixels(w/2, h/2, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    gfx->readdepth(w/2, h/2, depth);
     depthtoworldpos(depth, invmvpmatrix, camera1->o, pos);
 }
 
@@ -1429,29 +1343,29 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     bool underwater = camera1->o.z<hf;
     isoverview = player1->isspectating() && player1->spectatemode == SM_OVERVIEW;
 
-    glFogi(GL_FOG_START, (fog+64)/8);
-    glFogi(GL_FOG_END, fog);
+    gfx->fogi(GL_FOG_START, (fog+64)/8);
+    gfx->fogi(GL_FOG_END, fog);
     float fogc[4] = { (fogcolour>>16)/256.0f, ((fogcolour>>8)&255)/256.0f, (fogcolour&255)/256.0f, 1.0f },
           wfogc[4] = { hdr.watercolor[0]/255.0f, hdr.watercolor[1]/255.0f, hdr.watercolor[2]/255.0f, 1.0f };
-    glFogfv(GL_FOG_COLOR, fogc);
-    glClearColor(fogc[0], fogc[1], fogc[2], 1.0f);
-    if(isoverview) glDisable(GL_FOG);
+    gfx->fogfv(GL_FOG_COLOR, fogc);
+    gfx->clearcolor(fogc[0], fogc[1], fogc[2], 1.0f);
+    if(isoverview) gfx->disable(GL_FOG);
 
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
+    gfx->matrixmode(GL_PROJECTION);
+    gfx->loadidentity();
 
     if(underwater)
     {
         fovy += sinf(lastmillis/1000.0f)*2.0f;
         aspect += sinf(lastmillis/1000.0f+PI)*0.1f;
-        glFogfv(GL_FOG_COLOR, wfogc);
-        glFogi(GL_FOG_START, 0);
-        glFogi(GL_FOG_END, (fog+96)/8);
+        gfx->fogfv(GL_FOG_COLOR, wfogc);
+        gfx->fogi(GL_FOG_START, 0);
+        gfx->fogi(GL_FOG_END, (fog+96)/8);
     }
 
     farplane = fog*5/2;
     setperspective(fovy, aspect, 0.15f, farplane);
-    glMatrixMode(GL_MODELVIEW);
+    gfx->matrixmode(GL_MODELVIEW);
 
     transplayer();
     readmatrices();
@@ -1469,7 +1383,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     }
     rpmark(RP_REFLECTION);
 
-    glEnable(GL_TEXTURE_2D);
+    gfx->enable(GL_TEXTURE_2D);
 
     resetcubes();
 
@@ -1481,24 +1395,24 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     if(depthpick && hasFBO && !editmode) renderdepthpick(w, h);
     rpmark(RP_DEPTHPICK);
 
-    if(effective_stencilshadow && hasstencil && stencilbits >= 8) glClearStencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
-    glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
+    if(effective_stencilshadow && hasstencil && stencilbits >= 8) gfx->clearstencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
+    gfx->clear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
 
     setupstrips();
 
     renderstripssky();
 
-    glLoadIdentity();
-    glRotatef(camera1->pitch, -1, 0, 0);
-    glRotatef(camera1->yaw,   0, 1, 0);
-    glRotatef(90, 1, 0, 0);
-    glColor3f(1, 1, 1);
-    glDisable(GL_FOG);
-    glDepthFunc(GL_GREATER);
+    gfx->loadidentity();
+    gfx->rotate(camera1->pitch, -1, 0, 0);
+    gfx->rotate(camera1->yaw,   0, 1, 0);
+    gfx->rotate(90, 1, 0, 0);
+    gfx->color3f(1, 1, 1);
+    gfx->disable(GL_FOG);
+    gfx->depthfunc(GL_GREATER);
     draw_envbox(fog*4/3);
-    glDepthFunc(GL_LESS);
+    gfx->depthfunc(GL_LESS);
     fixresizedscreen();
-    if(!isoverview) glEnable(GL_FOG);
+    if(!isoverview) gfx->enable(GL_FOG);
 
     transplayer();
 
@@ -1540,7 +1454,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     resettmu(0);
 
-    glDisable(GL_CULL_FACE);
+    gfx->disable(GL_CULL_FACE);
 
     render_particles(curtime, PT_DECAL_MASK);
 
@@ -1549,17 +1463,17 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     render_particles(curtime, ~PT_DECAL_MASK);
     rpmark(RP_EFFECTS);
 
-    glDisable(GL_FOG);
-    glDisable(GL_TEXTURE_2D);
+    gfx->disable(GL_FOG);
+    gfx->disable(GL_TEXTURE_2D);
 
     if(editmode)
     {
         if(cursordepth==1.0f) worldpos = camera1->o;
         enablepolygonoffset(GL_POLYGON_OFFSET_LINE);
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glDepthMask(GL_FALSE);
+        gfx->depthmask(GL_FALSE);
         cursorupdate();
-        glDepthMask(GL_TRUE);
+        gfx->depthmask(GL_TRUE);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         disablepolygonoffset(GL_POLYGON_OFFSET_LINE, false);
     }
@@ -1574,8 +1488,8 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     renderpostfxfinal(w, h); // gamma: everything
 
-    glEnable(GL_CULL_FACE);
-    if(!isoverview) glEnable(GL_FOG);
+    gfx->enable(GL_CULL_FACE);
+    if(!isoverview) gfx->enable(GL_FOG);
 
     undodynlights();
     rpmark(RP_HUD);

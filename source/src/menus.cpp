@@ -1519,7 +1519,7 @@ void gmenu::render()
     int menupageswidth = pages ? text_width(menupages) : 0; // adds to topmost line, either menu title or header
     w = max(w, text_width(t) + (header ? 0 : menupageswidth));
     if(header) w = max(w, text_width(header) + menupageswidth);
-    if(lglass){ glScaled(-1,1,1); glTranslated(-2*VIRTW,0,0); }
+    if(lglass){ gfx->scale(-1,1,1); gfx->translate(-2*VIRTW,0,0); }
     int step = (FONTH*5)/4;
     int h = (mdisp+hitems+2)*step;
     int y = (2*VIRTH-h)/2;

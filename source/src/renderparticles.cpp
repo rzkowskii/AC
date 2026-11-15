@@ -205,10 +205,10 @@ void setuporb()
         }
     }
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glVertexPointer(3, GL_FLOAT, sizeof(expvert), &expverts->pos);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(expvert), &expverts->u);
+    gfx->enableclientstate(GL_VERTEX_ARRAY);
+    gfx->vertexpointer(3, GL_FLOAT, sizeof(expvert), &expverts->pos);
+    gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
+    gfx->texcoordpointer(2, GL_FLOAT, sizeof(expvert), &expverts->u);
 
 }
 
@@ -216,31 +216,31 @@ void draworb(bool inside, float r, float g, float b, float a)
 {
     loopi(!reflecting && inside ? 2 : 1)
     {
-        glColor4f(r, g, b, i ? a/2 : a);
+        gfx->color4f(r, g, b, i ? a/2 : a);
         if(i)
         {
-            glScalef(1, 1, -1);
-            glDepthFunc(GL_GEQUAL);
+            gfx->scale(1, 1, -1);
+            gfx->depthfunc(GL_GEQUAL);
         }
         if(inside)
         {
             if(!reflecting)
             {
-                glCullFace(GL_BACK);
-                glDrawElements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
-                glCullFace(GL_FRONT);
+                gfx->cullface(GL_BACK);
+                gfx->drawelements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
+                gfx->cullface(GL_FRONT);
             }
-            glScalef(1, 1, -1);
+            gfx->scale(1, 1, -1);
         }
-        glDrawElements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
-        if(i) glDepthFunc(GL_LESS);
+        gfx->drawelements(GL_TRIANGLES, heminumindices, GL_UNSIGNED_SHORT, hemiindices);
+        if(i) gfx->depthfunc(GL_LESS);
     }
 }
 
 void cleanuporb()
 {
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->disableclientstate(GL_VERTEX_ARRAY);
+    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 }
 
 struct particle { vec o, d; int fade, type; int millis; float size; particle *next; };
@@ -385,7 +385,7 @@ void render_particles(int time, int typemask)
 
             case PT_ORB:
                 setuporb();
-                glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+                gfx->blendfunc(GL_SRC_ALPHA, GL_ONE);
                 break;
 
             case PT_FIREBALL:
@@ -458,15 +458,15 @@ void render_particles(int time, int typemask)
                 case PT_ORB:
                 {
                     sz = 1.0f + (pt.sz-1.0f)*min(p->fade, lastmillis-p->millis)/p->fade;
-                    glPushMatrix();
-                    glTranslatef(p->o.x, p->o.y, p->o.z);
+                    gfx->pushmatrix();
+                    gfx->translate(p->o.x, p->o.y, p->o.z);
                     bool inside = p->o.dist(camera1->o) <= sz*1.25f; //1.25 is max wobble scale
                     vec oc(p->o);
                     oc.sub(camera1->o);
                     if(reflecting && !refracting) oc.z = p->o.z - (waterlevel - 0.3f);
-                    glScalef(-sz, sz, -sz);
+                    gfx->scale(-sz, sz, -sz);
                     draworb(inside, pt.r, pt.g, pt.b, 1.0f-sz/pt.sz);
-                    glPopMatrix();
+                    gfx->popmatrix();
                     xtraverts += heminumverts;
                     break;
                 }

@@ -186,8 +186,8 @@ struct md2 : vertmodel
             if(a[i].pos) link(NULL, a[i].tag, a[i].pos);
         }
 
-        if(!cullface) glDisable(GL_CULL_FACE);
-        else if(anim&ANIM_MIRROR) glCullFace(GL_BACK);
+        if(!cullface) gfx->disable(GL_CULL_FACE);
+        else if(anim&ANIM_MIRROR) gfx->cullface(GL_BACK);
 
         if(stenciling && !parts[0]->index)
         {
@@ -211,8 +211,8 @@ struct md2 : vertmodel
         if(anim&ANIM_MIRROR || scale!=1) matrixstack[0].scale(scale, anim&ANIM_MIRROR ? -scale : scale, scale);
         parts[0]->render(anim, varseed, speed, basetime, d);
 
-        if(!cullface) glEnable(GL_CULL_FACE);
-        else if(anim&ANIM_MIRROR) glCullFace(GL_FRONT);
+        if(!cullface) gfx->enable(GL_CULL_FACE);
+        else if(anim&ANIM_MIRROR) gfx->cullface(GL_FRONT);
 
         if(a) for(int i = 0; a[i].tag; i++)
         {

@@ -620,35 +620,35 @@ void renderbatchedmodel(model *m, batchedmodel &b)
     if(!OUTBORD(x, y))
     {
         sqr *s = S(x, y);
-        glColor3ub(s->r, s->g, s->b);
+        gfx->color3ub(s->r, s->g, s->b);
     }
-    else glColor3f(1, 1, 1);
+    else gfx->color3f(1, 1, 1);
 
     m->setskin(b.tex);
 
     if(b.anim&ANIM_TRANSLUCENT)
     {
-        glDepthMask(GL_FALSE);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        gfx->depthmask(GL_FALSE);
+        gfx->colormask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         m->render(b.anim|ANIM_NOSKIN, b.varseed, b.speed, b.basetime, b.o, b.roll, b.yaw, b.pitch, b.d, a, b.scale);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gfx->colormask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-        glDepthFunc(GL_LEQUAL);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gfx->depthfunc(GL_LEQUAL);
+        gfx->enable(GL_BLEND);
+        gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         GLfloat color[4];
-        glGetFloatv(GL_CURRENT_COLOR, color);
-        glColor4f(color[0], color[1], color[2], m->translucency);
+        gfx->getfloatv(GL_CURRENT_COLOR, color);
+        gfx->color4f(color[0], color[1], color[2], m->translucency);
     }
 
     m->render(b.anim, b.varseed, b.speed, b.basetime, b.o, b.roll, b.yaw, b.pitch, b.d, a, b.scale);
 
     if(b.anim&ANIM_TRANSLUCENT)
     {
-        glDepthFunc(GL_LESS);
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
+        gfx->depthfunc(GL_LESS);
+        gfx->disable(GL_BLEND);
+        gfx->depthmask(GL_TRUE);
     }
 }
 
@@ -671,7 +671,7 @@ void renderbatchedmodelshadow(model *m, batchedmodel &b)
             intensity *= max(1.0f - float(lastmillis - b.basetime)/dynshadowdecay, 0.0f);
             break;
     }
-    glColor4f(0, 0, 0, intensity);
+    gfx->color4f(0, 0, 0, intensity);
     m->rendershadow(b.anim, b.varseed, b.speed, b.basetime, dynshadowquad ? center : b.o, b.yaw, a);
 }
 
@@ -844,39 +844,39 @@ void rendermodel(const char *mdl, int anim, int tex, float rad, const vec &o, fl
                         intensity *= max(1.0f - float(lastmillis - basetime)/dynshadowdecay, 0.0f);
                         break;
                 }
-                glColor4f(0, 0, 0, intensity);
+                gfx->color4f(0, 0, 0, intensity);
                 m->rendershadow(anim, varseed, speed, basetime, dynshadowquad ? center : o, yaw, a);
             }
         }
-        glColor3ub(s->r, s->g, s->b);
+        gfx->color3ub(s->r, s->g, s->b);
     }
-    else glColor3f(1, 1, 1);
+    else gfx->color3f(1, 1, 1);
 
     m->setskin(tex);
 
     if(anim&ANIM_TRANSLUCENT)
     {
-        glDepthMask(GL_FALSE);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        gfx->depthmask(GL_FALSE);
+        gfx->colormask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
         m->render(anim|ANIM_NOSKIN, varseed, speed, basetime, o, 0, yaw, pitch, d, a, scale);
-        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        gfx->colormask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
-        glDepthFunc(GL_LEQUAL);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        gfx->depthfunc(GL_LEQUAL);
+        gfx->enable(GL_BLEND);
+        gfx->blendfunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
         GLfloat color[4];
-        glGetFloatv(GL_CURRENT_COLOR, color);
-        glColor4f(color[0], color[1], color[2], m->translucency);
+        gfx->getfloatv(GL_CURRENT_COLOR, color);
+        gfx->color4f(color[0], color[1], color[2], m->translucency);
     }
 
     m->render(anim, varseed, speed, basetime, o, roll, yaw, pitch, d, a, scale);
 
     if(anim&ANIM_TRANSLUCENT)
     {
-        glDepthFunc(GL_LESS);
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
+        gfx->depthfunc(GL_LESS);
+        gfx->disable(GL_BLEND);
+        gfx->depthmask(GL_TRUE);
     }
 
     m->endrender();

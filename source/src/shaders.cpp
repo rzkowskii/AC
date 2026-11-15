@@ -350,7 +350,7 @@ VARP(worldshader, 0, 0, 1);
 bool beginworldshader()
 {
     extern bool tmuismodulate2x(int n);
-    if(!worldshader || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D) || !loadprogram(worldprog)) return false;
+    if(!gfx_legacygl() || !worldshader || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D) || !loadprogram(worldprog)) return false;
     glUseProgram_(worldprog.program);
     glUniform1i_(worldprog.texloc, 0);
     glUniform1f_(worldprog.paramloc, glIsEnabled(GL_FOG) ? 1.0f : 0.0f);
@@ -423,7 +423,7 @@ bool beginlightgridshader()
 {
     extern bool tmuismodulate2x(int n);
     extern bool showmipstats;
-    if(!lightgrid || showmipstats || !hasMT || !glActiveTexture_ || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D)) return false;
+    if(!gfx_legacygl() || !lightgrid || showmipstats || !hasMT || !glActiveTexture_ || !tmuismodulate2x(0) || !glIsEnabled(GL_TEXTURE_2D)) return false;
     if(!loadprogram(lightgridprog)) return false;
     glActiveTexture_(GL_TEXTURE1_ARB);
     bool ok = updatelightgrid();

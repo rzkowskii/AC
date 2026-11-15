@@ -129,11 +129,11 @@ void uploadtexture(GLenum target, GLenum internal, int tw, int th, GLenum format
         buf = new uchar[tw*th*bpp];
         scaletexture((uchar *)pixels, pw, ph, bpp, buf, tw, th);
     }
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    gfx->pixelstorei(GL_UNPACK_ALIGNMENT, 1);
     for(int level = 0;; level++)
     {
         uchar *src = buf ? buf : (uchar *)pixels;
-        glTexImage2D(target, level, internal, tw, th, 0, format, type, src);
+        gfx->teximage2d(target, level, internal, tw, th, 0, format, type, src);
         if(!mipmap || max(tw, th) <= 1) break;
         int srcw = tw, srch = th;
         if(tw > 1) tw /= 2;
@@ -146,12 +146,12 @@ void uploadtexture(GLenum target, GLenum internal, int tw, int th, GLenum format
 
 void createtexture(int tnum, int w, int h, void *pixels, int clamp, bool mipmap, bool canreduce, GLenum format)
 {
-    glBindTexture(GL_TEXTURE_2D, tnum);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, clamp&1 ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, clamp&2 ? GL_CLAMP_TO_EDGE : GL_REPEAT);
-    if(hasAF && min(aniso, hwmaxaniso) > 0 && mipmap) glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, min(aniso, hwmaxaniso));
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, bilinear ? GL_LINEAR : GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+    gfx->bindtexture(GL_TEXTURE_2D, tnum);
+    gfx->texparameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, clamp&1 ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    gfx->texparameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, clamp&2 ? GL_CLAMP_TO_EDGE : GL_REPEAT);
+    if(hasAF && min(aniso, hwmaxaniso) > 0 && mipmap) gfx->texparameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, min(aniso, hwmaxaniso));
+    gfx->texparameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, bilinear ? GL_LINEAR : GL_NEAREST);
+    gfx->texparameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
         mipmap ?
             (trilinear ?
                 (bilinear ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_LINEAR) :
@@ -389,7 +389,7 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
     if(uniformtexres && scale > 1.0f) scalesurface(s, 1.0f/scale);
 
     GLuint tnum;
-    glGenTextures(1, &tnum);
+    gfx->gentextures(1, &tnum);
     createtexture(tnum, s->w, s->h, s->pixels, clamp, mipmap, canreduce, format);
     xs = s->w;
     ys = s->h;
@@ -531,13 +531,13 @@ Texture *lookuptexture(int tex, Texture *failtex, bool trydl)
 void cleanuptextures()
 {
     enumerate(textures, Texture, t,
-        if(t.id) { glDeleteTextures(1, &t.id); t.id = 0; }
+        if(t.id) { gfx->deletetextures(1, &t.id); t.id = 0; }
     );
 }
 
 bool reloadtexture(Texture &t)
 {
-    if(t.id) glDeleteTextures(1, &t.id);
+    if(t.id) gfx->deletetextures(1, &t.id);
     int xs = 1, ys = 1, bpp = 0;
     t.id = loadsurface(t.name, xs, ys, bpp, t.clamp, t.mipmap, t.canreduce, t.scale);
     t.xs = xs;
@@ -613,13 +613,13 @@ void draw_envbox_face(float s0, float t0, float x0, float y0, float z0,
                       float s3, float t3, float x3, float y3, float z3,
                       Texture *tex)
 {
-    glBindTexture(GL_TEXTURE_2D, tex->id);
-    glBegin(GL_TRIANGLE_STRIP);
-    glTexCoord2f(s3, t3); glVertex3f(x3, y3, z3);
-    glTexCoord2f(s2, t2); glVertex3f(x2, y2, z2);
-    glTexCoord2f(s0, t0); glVertex3f(x0, y0, z0);
-    glTexCoord2f(s1, t1); glVertex3f(x1, y1, z1);
-    glEnd();
+    gfx->bindtexture(GL_TEXTURE_2D, tex->id);
+    gfx->begin(GL_TRIANGLE_STRIP);
+    gfx->texcoord2f(s3, t3); gfx->vertex3f(x3, y3, z3);
+    gfx->texcoord2f(s2, t2); gfx->vertex3f(x2, y2, z2);
+    gfx->texcoord2f(s0, t0); gfx->vertex3f(x0, y0, z0);
+    gfx->texcoord2f(s1, t1); gfx->vertex3f(x1, y1, z1);
+    gfx->end();
     xtraverts += 4;
 }
 
@@ -637,7 +637,7 @@ void draw_envbox(int w)
 
     if(vclip < 0) return;
 
-    glDepthMask(GL_FALSE);
+    gfx->depthmask(GL_FALSE);
 
     draw_envbox_face(0.0f, 0.0f, -w, -w, -w,
                      1.0f, 0.0f, -w,  w, -w,
@@ -670,7 +670,7 @@ void draw_envbox(int w)
                      1.0f, 0.0f, -w, -w, -w,
                      1.0f, 1.0f, +w, -w, -w, sky[5] ? sky[5] : notexture);
 
-    glDepthMask(GL_TRUE);
+    gfx->depthmask(GL_TRUE);
 
     skyfloor = 1e16f;
 }
@@ -740,13 +740,13 @@ void parsetmufunc(tmufunc &f, const char *s)
 
 void committmufunc(bool rgb, tmufunc &dst, tmufunc &src)
 {
-    if(dst.combine!=src.combine) glTexEnvi(GL_TEXTURE_ENV, rgb ? GL_COMBINE_RGB_ARB : GL_COMBINE_ALPHA_ARB, src.combine);
+    if(dst.combine!=src.combine) gfx->texenvi(rgb ? GL_COMBINE_RGB_ARB : GL_COMBINE_ALPHA_ARB, src.combine);
     loopi(3)
     {
-        if(dst.sources[i]!=src.sources[i]) glTexEnvi(GL_TEXTURE_ENV, (rgb ? GL_SOURCE0_RGB_ARB : GL_SOURCE0_ALPHA_ARB)+i, src.sources[i]);
-        if(dst.ops[i]!=src.ops[i]) glTexEnvi(GL_TEXTURE_ENV, (rgb ? GL_OPERAND0_RGB_ARB : GL_OPERAND0_ALPHA_ARB)+i, src.ops[i]);
+        if(dst.sources[i]!=src.sources[i]) gfx->texenvi((rgb ? GL_SOURCE0_RGB_ARB : GL_SOURCE0_ALPHA_ARB)+i, src.sources[i]);
+        if(dst.ops[i]!=src.ops[i]) gfx->texenvi((rgb ? GL_OPERAND0_RGB_ARB : GL_OPERAND0_ALPHA_ARB)+i, src.ops[i]);
     }
-    if(dst.scale!=src.scale) glTexEnvi(GL_TEXTURE_ENV, rgb ? GL_RGB_SCALE_ARB : GL_ALPHA_SCALE, src.scale);
+    if(dst.scale!=src.scale) gfx->texenvi(rgb ? GL_RGB_SCALE_ARB : GL_ALPHA_SCALE, src.scale);
 }
 
 // is texture unit n set up as setuptmu(n, "T * P x 2") (the world's and models' state, which the scene shader replaces)?
@@ -766,8 +766,8 @@ bool tmuismodulate2x(int n)
 void committmu(int n, tmu &f)
 {
     if(n>=maxtmus) return;
-    if(tmus[n].mode!=f.mode) glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, f.mode);
-    if(memcmp(tmus[n].color, f.color, sizeof(f.color))) glTexEnvfv(GL_TEXTURE_ENV, GL_TEXTURE_ENV_COLOR, f.color);
+    if(tmus[n].mode!=f.mode) gfx->texenvi(GL_TEXTURE_ENV_MODE, f.mode);
+    if(memcmp(tmus[n].color, f.color, sizeof(f.color))) gfx->texenvfv(GL_TEXTURE_ENV_COLOR, f.color);
     committmufunc(true, tmus[n].rgb, f.rgb);
     committmufunc(false, tmus[n].alpha, f.alpha);
     tmus[n] = f;
@@ -817,20 +817,20 @@ void setuptmu(int n, const char *rgbfunc, const char *alphafunc)
 void inittmus()
 {
     GLint val;
-    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &val);
+    gfx->getintegerv(GL_MAX_TEXTURE_SIZE, &val);
     hwtexsize = val;
 
     if(hasTE && !hasMT) maxtmus = 1;
     else if(hasTE && hasMT)
     {
-        glGetIntegerv(GL_MAX_TEXTURE_UNITS_ARB, &val);
+        gfx->getintegerv(GL_MAX_TEXTURE_UNITS_ARB, &val);
         maxtmus = max(1, min(MAXTMUS, int(val)));
         loopi(maxtmus)
         {
-            glActiveTexture_(GL_TEXTURE0_ARB+i);
+            gfx->activetexture(GL_TEXTURE0_ARB+i);
             resettmu(i);
         }
-        glActiveTexture_(GL_TEXTURE0_ARB);
+        gfx->activetexture(GL_TEXTURE0_ARB);
     }
 }
 

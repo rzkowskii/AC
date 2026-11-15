@@ -15,7 +15,7 @@ static int worldvbogen = -1, worldvbolen = -1;
 
 void cleanupworldvbo()
 {
-    if(worldvbobuf) glDeleteBuffers_(1, &worldvbobuf);
+    if(worldvbobuf) gfx->deletebuffers(1, &worldvbobuf);
     worldvbobuf = 0;
     worldvbogen = worldvbolen = -1;
 }
@@ -24,28 +24,28 @@ void setupstrips()
 {
     finishstrips();
 
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_COLOR_ARRAY);
-    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->enableclientstate(GL_VERTEX_ARRAY);
+    gfx->enableclientstate(GL_COLOR_ARRAY);
+    gfx->enableclientstate(GL_TEXTURE_COORD_ARRAY);
 
     uintptr_t base = (uintptr_t)verts.getbuf(); // client memory, or offsets into the buffer object
     bool usevbo = worldvbo && hasVBO && verts.length();
     if(usevbo)
     {
-        if(!worldvbobuf) glGenBuffers_(1, &worldvbobuf);
-        glBindBuffer_(GL_ARRAY_BUFFER_ARB, worldvbobuf);
+        if(!worldvbobuf) gfx->genbuffers(1, &worldvbobuf);
+        gfx->bindbuffer(GL_ARRAY_BUFFER_ARB, worldvbobuf);
         if(worldvbogen != vertsgen || worldvbolen != verts.length())
         {
-            glBufferData_(GL_ARRAY_BUFFER_ARB, verts.length()*sizeof(vertex), verts.getbuf(), GL_STREAM_DRAW_ARB);
+            gfx->bufferdata(GL_ARRAY_BUFFER_ARB, verts.length()*sizeof(vertex), verts.getbuf(), GL_STREAM_DRAW_ARB);
             worldvbogen = vertsgen;
             worldvbolen = verts.length();
         }
         base = 0;
     }
-    glVertexPointer(3, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, x)));
-    glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(vertex), (const void *)(base + offsetof(vertex, r)));
-    glTexCoordPointer(2, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, u)));
-    if(usevbo) glBindBuffer_(GL_ARRAY_BUFFER_ARB, 0); // the pointers keep referring to the buffer
+    gfx->vertexpointer(3, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, x)));
+    gfx->colorpointer(4, GL_UNSIGNED_BYTE, sizeof(vertex), (const void *)(base + offsetof(vertex, r)));
+    gfx->texcoordpointer(2, GL_FLOAT, sizeof(vertex), (const void *)(base + offsetof(vertex, u)));
+    if(usevbo) gfx->bindbuffer(GL_ARRAY_BUFFER_ARB, 0); // the pointers keep referring to the buffer
 }
 
 struct strips { vector<GLint> first; vector<GLsizei> count; };
@@ -66,8 +66,8 @@ extern int ati_mda_bug;
 #define RENDERSTRIPS(strips, type) \
     if(strips.first.length()) \
     { \
-        if(hasMDA && !ati_mda_bug) glMultiDrawArrays_(type, strips.first.getbuf(), strips.count.getbuf(), strips.first.length()); \
-        else loopv(strips.first) glDrawArrays(type, strips.first[i], strips.count[i]); \
+        if(hasMDA && !ati_mda_bug) gfx->multidrawarrays(type, strips.first.getbuf(), strips.count.getbuf(), strips.first.length()); \
+        else loopv(strips.first) gfx->drawarrays(type, strips.first[i], strips.count[i]); \
         strips.first.setsize(0); \
         strips.count.setsize(0); \
     }
@@ -75,13 +75,13 @@ extern int ati_mda_bug;
 void renderstripssky()
 {
     if(skystrips.tris.first.empty() && skystrips.tristrips.first.empty() && skystrips.quads.first.empty()) return;
-    glDisable(GL_TEXTURE_2D);
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    gfx->disable(GL_TEXTURE_2D);
+    gfx->colormask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     RENDERSTRIPS(skystrips.tris, GL_TRIANGLES);
     RENDERSTRIPS(skystrips.tristrips, GL_TRIANGLE_STRIP);
     RENDERSTRIPS(skystrips.quads, GL_QUADS);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    glEnable(GL_TEXTURE_2D);
+    gfx->colormask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    gfx->enable(GL_TEXTURE_2D);
 }
 
 void renderstrips()
@@ -91,7 +91,7 @@ void renderstrips()
     loopj(renderedtexs)
     {
         stripbatch &sb = stripbatches[j];
-        glBindTexture(GL_TEXTURE_2D, lookupworldtexture(sb.tex)->id);
+        gfx->bindtexture(GL_TEXTURE_2D, lookupworldtexture(sb.tex)->id);
         RENDERSTRIPS(sb.tris, GL_TRIANGLES);
         RENDERSTRIPS(sb.tristrips, GL_TRIANGLE_STRIP);
         RENDERSTRIPS(sb.quads, GL_QUADS);
@@ -99,9 +99,9 @@ void renderstrips()
     renderedtexs = 0;
     if(shader) endworldshader();
 
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->disableclientstate(GL_VERTEX_ARRAY);
+    gfx->disableclientstate(GL_COLOR_ARRAY);
+    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 }
 
 // Depth-only drawing of the sky and world strips for the crosshair pick pass (see renderdepthpick() in rendergl.cpp).
@@ -109,8 +109,8 @@ void renderstrips()
 #define DRAWSTRIPS(strips, type) \
     if(strips.first.length()) \
     { \
-        if(hasMDA && !ati_mda_bug) glMultiDrawArrays_(type, strips.first.getbuf(), strips.count.getbuf(), strips.first.length()); \
-        else loopv(strips.first) glDrawArrays(type, strips.first[i], strips.count[i]); \
+        if(hasMDA && !ati_mda_bug) gfx->multidrawarrays(type, strips.first.getbuf(), strips.count.getbuf(), strips.first.length()); \
+        else loopv(strips.first) gfx->drawarrays(type, strips.first[i], strips.count[i]); \
     }
 
 void renderstripsdepth()
@@ -125,9 +125,9 @@ void renderstripsdepth()
         DRAWSTRIPS(sb.tristrips, GL_TRIANGLE_STRIP);
         DRAWSTRIPS(sb.quads, GL_QUADS);
     }
-    glDisableClientState(GL_VERTEX_ARRAY);
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    gfx->disableclientstate(GL_VERTEX_ARRAY);
+    gfx->disableclientstate(GL_COLOR_ARRAY);
+    gfx->disableclientstate(GL_TEXTURE_COORD_ARRAY);
 }
 
 void addstrip(int type, int tex, int start, int n)

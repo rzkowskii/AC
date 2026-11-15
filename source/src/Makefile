@@ -140,6 +140,7 @@ CLIENT_OBJS= \
 	docs.o \
 	editing.o \
 	entities.o \
+	gfx_gl.o \
 	http.o \
 	log.o \
 	main.o \
