@@ -94,7 +94,7 @@ struct textinputbuffer
                 if(pos>=0 && ++pos>=(int)strlen(buf)) pos = -1;
                 break;
 
-            case SDLK_v:
+            case SDLK_V:
                 if(SDL_GetModState() & MOD_KEYS_CTRL)
                 {
                     pasteclipboard();

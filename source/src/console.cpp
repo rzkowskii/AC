@@ -177,9 +177,9 @@ keym *findbindc(int code)
 
 keym *autokeymap(int keycode, int scancode)
 {
-    static bool scdone[SDL_NUM_SCANCODES] = { false };
+    static bool scdone[SDL_SCANCODE_COUNT] = { false };
     int sc = keycode <= SDLK_SCANCODE_MASK ? scancode : (keycode & (SDLK_SCANCODE_MASK - 1));
-    if(sc < 0 || sc >= SDL_NUM_SCANCODES || scdone[sc]) return NULL;
+    if(sc < 0 || sc >= SDL_SCANCODE_COUNT || scdone[sc]) return NULL;
     scdone[sc] = true;
     string text;
     filtertext(text, SDL_GetScancodeName((SDL_Scancode) sc), FTXT__AUTOKEYMAPNAME);
@@ -521,13 +521,13 @@ void consolekey(int code, bool isdown, SDL_Keymod mod)
                 if(!cmdaction)
                 {
                     if(!beforecomplete) beforecomplete = newstring(cmdline.buf);
-                    complete(cmdline.buf, (mod & KMOD_LSHIFT) ? true : false);
+                    complete(cmdline.buf, (mod & SDL_KMOD_LSHIFT) ? true : false);
                     if(cmdline.pos >= 0 && cmdline.pos >= (int)strlen(cmdline.buf)) cmdline.pos = -1;
                 }
                 break;
 
             case SDLK_ESCAPE:
-                if(mod & KMOD_LSHIFT)    // LSHIFT+ESC restores buffer from before complete()
+                if(mod & SDL_KMOD_LSHIFT)    // LSHIFT+ESC restores buffer from before complete()
                 {
                     if(beforecomplete) copystring(cmdline.buf, beforecomplete);
                     ignoreescup = true;
@@ -690,11 +690,11 @@ void writekeymap() // create keymap.cfg with proper constants from SDL2 header f
         { SDLK_ESCAPE, "ESCAPE" },
         { SDLK_SPACE, "SPACE" },
         { SDLK_EXCLAIM, "EXCLAIM" },
-        { SDLK_QUOTEDBL, "QUOTEDBL" },
+        { SDLK_DBLAPOSTROPHE, "QUOTEDBL" },
         { SDLK_HASH, "HASH" },
         { SDLK_DOLLAR, "DOLLAR" },
         { SDLK_AMPERSAND, "AMPERSAND" },
-        { SDLK_QUOTE, "QUOTE" },
+        { SDLK_APOSTROPHE, "QUOTE" },
         { SDLK_LEFTPAREN, "LEFTPAREN" },
         { SDLK_RIGHTPAREN, "RIGHTPAREN" },
         { SDLK_ASTERISK, "ASTERISK" },
@@ -725,33 +725,33 @@ void writekeymap() // create keymap.cfg with proper constants from SDL2 header f
         { SDLK_RIGHTBRACKET, "RIGHTBRACKET" },
         { SDLK_CARET, "CARET" },
         { SDLK_UNDERSCORE, "UNDERSCORE" },
-        { SDLK_BACKQUOTE, "BACKQUOTE" },
-        { SDLK_a, "A" },
-        { SDLK_b, "B" },
-        { SDLK_c, "C" },
-        { SDLK_d, "D" },
-        { SDLK_e, "E" },
-        { SDLK_f, "F" },
-        { SDLK_g, "G" },
-        { SDLK_h, "H" },
-        { SDLK_i, "I" },
-        { SDLK_j, "J" },
-        { SDLK_k, "K" },
-        { SDLK_l, "L" },
-        { SDLK_m, "M" },
-        { SDLK_n, "N" },
-        { SDLK_o, "O" },
-        { SDLK_p, "P" },
-        { SDLK_q, "Q" },
-        { SDLK_r, "R" },
-        { SDLK_s, "S" },
-        { SDLK_t, "T" },
-        { SDLK_u, "U" },
-        { SDLK_v, "V" },
-        { SDLK_w, "W" },
-        { SDLK_x, "X" },
-        { SDLK_y, "Y" },
-        { SDLK_z, "Z" },
+        { SDLK_GRAVE, "BACKQUOTE" },
+        { SDLK_A, "A" },
+        { SDLK_B, "B" },
+        { SDLK_C, "C" },
+        { SDLK_D, "D" },
+        { SDLK_E, "E" },
+        { SDLK_F, "F" },
+        { SDLK_G, "G" },
+        { SDLK_H, "H" },
+        { SDLK_I, "I" },
+        { SDLK_J, "J" },
+        { SDLK_K, "K" },
+        { SDLK_L, "L" },
+        { SDLK_M, "M" },
+        { SDLK_N, "N" },
+        { SDLK_O, "O" },
+        { SDLK_P, "P" },
+        { SDLK_Q, "Q" },
+        { SDLK_R, "R" },
+        { SDLK_S, "S" },
+        { SDLK_T, "T" },
+        { SDLK_U, "U" },
+        { SDLK_V, "V" },
+        { SDLK_W, "W" },
+        { SDLK_X, "X" },
+        { SDLK_Y, "Y" },
+        { SDLK_Z, "Z" },
         { SDLK_DELETE, "DELETE" },
         { SDLK_KP_0, "KP0" },
         { SDLK_KP_1, "KP1" },
@@ -899,16 +899,12 @@ void writekeymap() // create keymap.cfg with proper constants from SDL2 header f
         { SDLK_KP_OCTAL, "KP_OCTAL" },
         { SDLK_KP_DECIMAL, "KP_DECIMAL" },
         { SDLK_KP_HEXADECIMAL, "KP_HEXADECIMAL" },
-        { SDLK_AUDIONEXT, "AUDIONEXT" },
-        { SDLK_AUDIOPREV, "AUDIOPREV" },
-        { SDLK_AUDIOSTOP, "AUDIOSTOP" },
-        { SDLK_AUDIOPLAY, "AUDIOPLAY" },
-        { SDLK_AUDIOMUTE, "AUDIOMUTE" },
-        { SDLK_MEDIASELECT, "MEDIASELECT" },
-        { SDLK_WWW, "WWW" },
-        { SDLK_MAIL, "MAIL" },
-        { SDLK_CALCULATOR, "CALCULATOR" },
-        { SDLK_COMPUTER, "COMPUTER" },
+        { SDLK_MEDIA_NEXT_TRACK, "AUDIONEXT" },
+        { SDLK_MEDIA_PREVIOUS_TRACK, "AUDIOPREV" },
+        { SDLK_MEDIA_STOP, "AUDIOSTOP" },
+        { SDLK_MEDIA_PLAY, "AUDIOPLAY" },
+        { SDLK_MUTE, "AUDIOMUTE" },
+        { SDLK_MEDIA_SELECT, "MEDIASELECT" },
         { SDLK_AC_SEARCH, "AC_SEARCH" },
         { SDLK_AC_HOME, "AC_HOME" },
         { SDLK_AC_BACK, "AC_BACK" },
@@ -916,13 +912,7 @@ void writekeymap() // create keymap.cfg with proper constants from SDL2 header f
         { SDLK_AC_STOP, "AC_STOP" },
         { SDLK_AC_REFRESH, "AC_REFRESH" },
         { SDLK_AC_BOOKMARKS, "AC_BOOKMARKS" },
-        { SDLK_BRIGHTNESSDOWN, "BRIGHTNESSDOWN" },
-        { SDLK_BRIGHTNESSUP, "BRIGHTNESSUP" },
-        { SDLK_DISPLAYSWITCH, "DISPLAYSWITCH" },
-        { SDLK_KBDILLUMTOGGLE, "KBDILLUMTOGGLE" },
-        { SDLK_KBDILLUMDOWN, "KBDILLUMDOWN" },
-        { SDLK_KBDILLUMUP, "KBDILLUMUP" },
-        { SDLK_EJECT, "EJECT" },
+        { SDLK_MEDIA_EJECT, "EJECT" },
         { SDLK_SLEEP, "SLEEP" },
         { 0, "" }
         };

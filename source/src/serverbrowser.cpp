@@ -2,7 +2,7 @@
 
 #include "cube.h"
 
-#include "SDL_thread.h"
+#include <SDL3/SDL_thread.h>
 
 extern bool isdedicated;
 
@@ -24,8 +24,8 @@ vector<const char *> resolverqueries;
 vector<resolverresult> resolverresults;
 int curstyletab = 0; // which TAB is showing
 const char *styletabnames[] = { "regular", "parkour", "gema" }; // [0…[MAXSSTYPES
-SDL_mutex *resolvermutex;
-SDL_cond *querycond, *resultcond;
+SDL_Mutex *resolvermutex;
+SDL_Condition *querycond, *resultcond;
 
 #define RESOLVERTHREADS 1
 #define RESOLVERLIMIT 3000
@@ -36,12 +36,12 @@ int resolverloop(void * data)
     SDL_LockMutex(resolvermutex);
     SDL_Thread *thread = rt->thread;
     SDL_UnlockMutex(resolvermutex);
-    if(!thread || SDL_GetThreadID(thread) != SDL_ThreadID())
+    if(!thread || SDL_GetThreadID(thread) != SDL_GetCurrentThreadID())
         return 0;
     while(thread == rt->thread)
     {
         SDL_LockMutex(resolvermutex);
-        while(resolverqueries.empty()) SDL_CondWait(querycond, resolvermutex);
+        while(resolverqueries.empty()) SDL_WaitCondition(querycond, resolvermutex);
         rt->query = resolverqueries.pop();
         rt->starttime = totalmillis;
         SDL_UnlockMutex(resolvermutex);
@@ -57,7 +57,7 @@ int resolverloop(void * data)
             rr.address = address;
             rt->query = NULL;
             rt->starttime = 0;
-            SDL_CondSignal(resultcond);
+            SDL_SignalCondition(resultcond);
         }
         SDL_UnlockMutex(resolvermutex);
     }
@@ -67,8 +67,8 @@ int resolverloop(void * data)
 void resolverinit()
 {
     resolvermutex = SDL_CreateMutex();
-    querycond = SDL_CreateCond();
-    resultcond = SDL_CreateCond();
+    querycond = SDL_CreateCondition();
+    resultcond = SDL_CreateCondition();
 
     SDL_LockMutex(resolvermutex);
     loopi(RESOLVERTHREADS)
@@ -115,7 +115,7 @@ void resolverquery(const char *name)
 
     SDL_LockMutex(resolvermutex);
     resolverqueries.add(name);
-    SDL_CondSignal(querycond);
+    SDL_SignalCondition(querycond);
     SDL_UnlockMutex(resolvermutex);
 }
 
@@ -157,12 +157,12 @@ bool resolverwait(const char *name, ENetAddress *address)
 
     SDL_LockMutex(resolvermutex);
     resolverqueries.add(name);
-    SDL_CondSignal(querycond);
+    SDL_SignalCondition(querycond);
     int starttime = SDL_GetTicks(), timeout = 0;
     bool resolved = false;
     for(;;)
     {
-        SDL_CondWaitTimeout(resultcond, resolvermutex, 250);
+        SDL_WaitConditionTimeout(resultcond, resolvermutex, 250);
         loopv(resolverresults) if(resolverresults[i].query == name)
         {
             address->host = resolverresults[i].address.host;
@@ -177,7 +177,7 @@ bool resolverwait(const char *name, ENetAddress *address)
         SDL_Event event;
         while(SDL_PollEvent(&event))
         {
-            if(event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) timeout = RESOLVERLIMIT + 1;
+            if(event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) timeout = RESOLVERLIMIT + 1;
         }
 
         if(timeout > RESOLVERLIMIT) break;
@@ -195,8 +195,8 @@ bool resolverwait(const char *name, ENetAddress *address)
 }
 
 SDL_Thread *connthread = NULL;
-SDL_mutex *connmutex = NULL;
-SDL_cond *conncond = NULL;
+SDL_Mutex *connmutex = NULL;
+SDL_Condition *conncond = NULL;
 
 struct connectdata
 {
@@ -210,7 +210,7 @@ struct connectdata
 int connectthread(void *data)
 {
     SDL_LockMutex(connmutex);
-    if(!connthread || SDL_GetThreadID(connthread) != SDL_ThreadID())
+    if(!connthread || SDL_GetThreadID(connthread) != SDL_GetCurrentThreadID())
     {
         SDL_UnlockMutex(connmutex);
         return 0;
@@ -221,14 +221,14 @@ int connectthread(void *data)
     int result = enet_socket_connect(cd.sock, &cd.address);
 
     SDL_LockMutex(connmutex);
-    if(!connthread || SDL_GetThreadID(connthread) != SDL_ThreadID())
+    if(!connthread || SDL_GetThreadID(connthread) != SDL_GetCurrentThreadID())
     {
         enet_socket_destroy(cd.sock);
         SDL_UnlockMutex(connmutex);
         return 0;
     }
     ((connectdata *)data)->result = result;
-    SDL_CondSignal(conncond);
+    SDL_SignalCondition(conncond);
     SDL_UnlockMutex(connmutex);
 
     return 0;
@@ -249,7 +249,7 @@ int connectwithtimeout(ENetSocket sock, const char *hostname, ENetAddress &addre
     show_out_of_renderloop_progress(0, text);
 
     if(!connmutex) connmutex = SDL_CreateMutex();
-    if(!conncond) conncond = SDL_CreateCond();
+    if(!conncond) conncond = SDL_CreateCondition();
     SDL_LockMutex(connmutex);
     connectdata cd = { sock, address, -1 };
     connthread = SDL_CreateThread(connectthread, "ConnectThread", &cd);
@@ -257,7 +257,7 @@ int connectwithtimeout(ENetSocket sock, const char *hostname, ENetAddress &addre
     int starttime = SDL_GetTicks(), timeout = 0;
     for(;;)
     {
-        if(!SDL_CondWaitTimeout(conncond, connmutex, 250))
+        if(SDL_WaitConditionTimeout(conncond, connmutex, 250)) // signalled (SDL3 returns true; SDL2 returned 0)
         {
             if(cd.result<0) enet_socket_destroy(sock);
             break;
@@ -267,7 +267,7 @@ int connectwithtimeout(ENetSocket sock, const char *hostname, ENetAddress &addre
         SDL_Event event;
         while(SDL_PollEvent(&event))
         {
-            if(event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) timeout = CONNLIMIT + 1;
+            if(event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) timeout = CONNLIMIT + 1;
         }
         if(timeout > CONNLIMIT) break;
     }
@@ -1330,12 +1330,12 @@ bool serverinfokey(void *menu, int code, bool isdown)
             pinglastselected = true;
             break;
 
-        case SDLK_m:
+        case SDLK_M:
             if(lastselectedserver) lastselectedserver->getinfo = EXTPING_MAPROT;
             pinglastselected = true;
             break;
 
-        case SDLK_c:
+        case SDLK_C:
             lastselectedserver = getconnectedserverinfo();
             pinglastselected = true;
             break;

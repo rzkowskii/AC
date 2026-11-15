@@ -496,40 +496,52 @@ void backup(char *name, char *backupname)
 }
 
 #ifndef STANDALONE
-static Sint64 rwopsseek(SDL_RWops *rw, Sint64 offset, int whence)
+static Sint64 rwopssize(void *userdata)
 {
-    stream *f = (stream *)rw->hidden.unknown.data1;
-    if((!offset && whence==SEEK_CUR) || f->seek(offset, whence)) return f->tell();
+    return ((stream *)userdata)->size();
+}
+
+static Sint64 rwopsseek(void *userdata, Sint64 offset, SDL_IOWhence whence)
+{
+    stream *f = (stream *)userdata;
+    int w = whence == SDL_IO_SEEK_SET ? SEEK_SET : (whence == SDL_IO_SEEK_CUR ? SEEK_CUR : SEEK_END);
+    if((!offset && w==SEEK_CUR) || f->seek(offset, w)) return f->tell();
     return -1;
 }
 
-static size_t rwopsread(SDL_RWops *rw, void *buf, size_t size, size_t nmemb)
+static size_t rwopsread(void *userdata, void *buf, size_t size, SDL_IOStatus *status)
 {
-    stream *f = (stream *)rw->hidden.unknown.data1;
-    return f->read(buf, size*nmemb)/size;
+    stream *f = (stream *)userdata;
+    int n = f->read(buf, size);
+    if(n < 0) n = 0;
+    if((size_t)n < size) *status = f->end() ? SDL_IO_STATUS_EOF : SDL_IO_STATUS_ERROR;
+    return n;
 }
 
-static size_t rwopswrite(SDL_RWops *rw, const void *buf, size_t size, size_t nmemb)
+static size_t rwopswrite(void *userdata, const void *buf, size_t size, SDL_IOStatus *status)
 {
-    stream *f = (stream *)rw->hidden.unknown.data1;
-    return f->write(buf, size*nmemb)/size;
+    stream *f = (stream *)userdata;
+    int n = f->write(buf, size);
+    if(n < 0) n = 0;
+    if((size_t)n < size) *status = SDL_IO_STATUS_ERROR;
+    return n;
 }
 
-static int rwopsclose(SDL_RWops *rw)
+static bool rwopsclose(void *userdata)
 {
-    return 0;
+    return true; // the stream stays open: its owner deletes it
 }
 
-SDL_RWops *stream::rwops()
+SDL_IOStream *stream::rwops()
 {
-    SDL_RWops *rw = SDL_AllocRW();
-    if(!rw) return NULL;
-    rw->hidden.unknown.data1 = this;
-    rw->seek = rwopsseek;
-    rw->read = rwopsread;
-    rw->write = rwopswrite;
-    rw->close = rwopsclose;
-    return rw;
+    SDL_IOStreamInterface iface;
+    SDL_INIT_INTERFACE(&iface);
+    iface.size = rwopssize;
+    iface.seek = rwopsseek;
+    iface.read = rwopsread;
+    iface.write = rwopswrite;
+    iface.close = rwopsclose;
+    return SDL_OpenIO(&iface, this);
 }
 #endif
 

@@ -163,62 +163,59 @@ void createtexture(int tnum, int w, int h, void *pixels, int clamp, bool mipmap,
     uploadtexture(GL_TEXTURE_2D, format, tw, th, format, GL_UNSIGNED_BYTE, pixels, w, h, mipmap);
 }
 
-#if SDL_BYTEORDER == SDL_BIG_ENDIAN
-#define RGBAMASKS 0xff000000, 0x00ff0000, 0x0000ff00, 0x000000ff
-#define RGBMASKS  0xff0000, 0x00ff00, 0x0000ff, 0
-#else
-#define RGBAMASKS 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000
-#define RGBMASKS  0x0000ff, 0x00ff00, 0xff0000, 0
-#endif
+// The surfaces the texture code works with hold bytes R, G, B (and A) in memory: SDL_PIXELFORMAT_RGB24 and
+// SDL_PIXELFORMAT_RGBA32, on either byte order. 8-bit grey images have a grey-ramp palette.
 
 SDL_Surface *wrapsurface(void *data, int width, int height, int bpp)
 {
     switch(bpp)
     {
-        case 3: return SDL_CreateRGBSurfaceFrom(data, width, height, 8*bpp, bpp*width, RGBMASKS);
-        case 4: return SDL_CreateRGBSurfaceFrom(data, width, height, 8*bpp, bpp*width, RGBAMASKS);
+        case 3: return SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGB24, data, bpp*width);
+        case 4: return SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, data, bpp*width);
     }
     return NULL;
 }
 
 SDL_Surface *creatergbsurface(int width, int height)
 {
-    return SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, 24, RGBMASKS);
+    return SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGB24);
 }
 
 SDL_Surface *creatergbasurface(int width, int height)
 {
-    return SDL_CreateRGBSurface(SDL_SWSURFACE, width, height, 32, RGBAMASKS);
+    return SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32);
 }
 
 SDL_Surface *forcergbsurface(SDL_Surface *os)
 {
-    SDL_Surface *ns = SDL_CreateRGBSurface(SDL_SWSURFACE, os->w, os->h, 24, RGBMASKS);
+    SDL_Surface *ns = SDL_CreateSurface(os->w, os->h, SDL_PIXELFORMAT_RGB24);
     if(ns) SDL_BlitSurface(os, NULL, ns, NULL);
-    SDL_FreeSurface(os);
+    SDL_DestroySurface(os);
     return ns;
 }
 
 SDL_Surface *forcergbasurface(SDL_Surface *os)
 {
-    SDL_Surface *ns = SDL_CreateRGBSurface(SDL_SWSURFACE, os->w, os->h, 32, RGBAMASKS);
+    SDL_Surface *ns = SDL_CreateSurface(os->w, os->h, SDL_PIXELFORMAT_RGBA32);
     if(ns)
     {
         SDL_SetSurfaceAlphaMod(os, SDL_ALPHA_OPAQUE);
         SDL_BlitSurface(os, NULL, ns, NULL);
     }
-    SDL_FreeSurface(os);
+    SDL_DestroySurface(os);
     return ns;
 }
 
+static inline int surfacebpp(SDL_Surface *s) { return SDL_BYTESPERPIXEL(s->format); }
+
 bool checkgrayscale(SDL_Surface *s)
 {
-    // gray scale images have 256 levels, no colorkey, and the palette is a ramp
-    if(s->format->palette)
+    // gray scale images have 256 levels, a colorkey (as before: SDL2's SDL_GetColorKey() "succeeded"), and the palette is a ramp
+    SDL_Palette *palette = SDL_GetSurfacePalette(s);
+    if(palette)
     {
-        Uint32 ck = 0;
-        if(s->format->palette->ncolors != 256 || SDL_GetColorKey(s, &ck) == -1) return false;
-        const SDL_Color *colors = s->format->palette->colors;
+        if(palette->ncolors != 256 || !SDL_SurfaceHasColorKey(s)) return false;
+        const SDL_Color *colors = palette->colors;
         loopi(256) if(colors[i].r != i || colors[i].g != i || colors[i].b != i) return false;
     }
     return true;
@@ -227,8 +224,10 @@ bool checkgrayscale(SDL_Surface *s)
 int fixcl(SDL_Surface *s, int threshold)
 {
     if(!s || !s->h || !s->w) return 0;
-    int sum = 0, w, a0 = *((uchar *) &s->format->Amask) ? 1 : 0;
-    if(s->format->palette || s->format->BytesPerPixel < 3) s = (SDL_Surface *)s->pixels;
+    int bpp = surfacebpp(s);
+    const SDL_PixelFormatDetails *details = SDL_GetPixelFormatDetails(s->format);
+    int sum = 0, w, a0 = details && *((uchar *) &details->Amask) ? 1 : 0;
+    if(SDL_GetSurfacePalette(s) || bpp < 3) return 0; // (only RGB and RGBA skins are adjusted)
     for(int y = 0; y < s->h; y++)
     {
         uchar *pix = ((uchar *)s->pixels) + y * s->pitch + a0;
@@ -236,7 +235,7 @@ int fixcl(SDL_Surface *s, int threshold)
         for(int x = 0; x < s->w; x++)
         {
             w += iabs(((pix[0] * pix[0]) | (pix[1] * pix[1]) | (pix[2] * pix[2])) - ((pix[0] * pix[1] * pix[2]) / 222));
-            pix += s->format->BytesPerPixel;
+            pix += bpp;
         }
         sum += w / s->w;
     }
@@ -248,7 +247,7 @@ int fixcl(SDL_Surface *s, int threshold)
         for(int x = 0; x < s->w; x++)
         {
             loopi(3) pix[i] /= t;
-            pix += s->format->BytesPerPixel;
+            pix += bpp;
         }
     }
     return t;
@@ -257,29 +256,26 @@ int fixcl(SDL_Surface *s, int threshold)
 SDL_Surface *fixsurfaceformat(SDL_Surface *s)
 {
     if(!s) return NULL;
-    if(!s->pixels || min(s->w, s->h) <= 0 || s->format->BytesPerPixel <= 0)
+    if(!s->pixels || min(s->w, s->h) <= 0 || surfacebpp(s) <= 0)
     {
-        SDL_FreeSurface(s);
+        SDL_DestroySurface(s);
         return NULL;
     }
-    static const uint rgbmasks[] = { RGBMASKS }, rgbamasks[] = { RGBAMASKS };
-    switch(s->format->BytesPerPixel)
+    switch(surfacebpp(s))
     {
         case 1:
             if(!checkgrayscale(s))
             {
-                Uint32 ck;
-                SDL_GetColorKey(s, &ck);
+                Uint32 ck = 0;
+                SDL_GetSurfaceColorKey(s, &ck);
                 return ck ? forcergbasurface(s) : forcergbsurface(s);
             }
             break;
         case 3:
-            if(s->format->Rmask != rgbmasks[0] || s->format->Gmask != rgbmasks[1] || s->format->Bmask != rgbmasks[2])
-                return forcergbsurface(s);
+            if(s->format != SDL_PIXELFORMAT_RGB24) return forcergbsurface(s);
             break;
         case 4:
-            if(s->format->Rmask != rgbamasks[0] || s->format->Gmask != rgbamasks[1] || s->format->Bmask != rgbamasks[2] || s->format->Amask != rgbamasks[3])
-                return s->format->Amask ? forcergbasurface(s) : forcergbsurface(s);
+            if(s->format != SDL_PIXELFORMAT_RGBA32) return SDL_ISPIXELFORMAT_ALPHA(s->format) ? forcergbasurface(s) : forcergbsurface(s);
             break;
     }
     return s;
@@ -299,16 +295,17 @@ GLenum texformat(int bpp)
 
 SDL_Surface *texdecal(SDL_Surface *s)
 {
-    SDL_Surface *m = SDL_CreateRGBSurface(SDL_SWSURFACE, s->w, s->h, 16, 0, 0, 0, 0);
+    SDL_Surface *m = SDL_CreateSurface(s->w, s->h, SDL_PIXELFORMAT_RGB565); // 16 bits per pixel: luminance, alpha
     if(!m) fatal("create surface");
     uchar *dst = (uchar *)m->pixels, *src = (uchar *)s->pixels;
+    int bpp = surfacebpp(s);
     loopi(s->h*s->w)
     {
         *dst++ = *src;
         *dst++ = 255 - *src;
-        src += s->format->BytesPerPixel;
+        src += bpp;
     }
-    SDL_FreeSurface(s);
+    SDL_DestroySurface(s);
     return m;
 }
 
@@ -318,12 +315,34 @@ extern uchar *stbdecode(const uchar *data, int len, int &w, int &h, int &channel
 extern const char *stberror();
 extern stream *openrawfile(const char *filename, const char *mode);
 
+// a surface that owns pixels allocated with SDL_malloc (rows tightly packed) and frees them
+static SDL_Surface *ownedsurface(uchar *pixels, int w, int h, SDL_PixelFormat format, SDL_Palette *copypalette = NULL)
+{
+    SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, format, pixels, w*SDL_BYTESPERPIXEL(format));
+    if(!s) { SDL_free(pixels); return NULL; }
+    if(SDL_ISPIXELFORMAT_INDEXED(format))
+    {
+        SDL_Palette *palette = SDL_GetSurfacePalette(s);
+        if(!palette) palette = SDL_CreateSurfacePalette(s);
+        if(palette)
+        {
+            if(copypalette) SDL_SetPaletteColors(palette, copypalette->colors, 0, min(palette->ncolors, copypalette->ncolors));
+            else loopi(palette->ncolors)
+            {
+                SDL_Color &c = palette->colors[i];
+                c.r = c.g = c.b = i;
+            }
+        }
+    }
+    s->flags &= ~SDL_SURFACE_PREALLOCATED; // SDL_DestroySurface() frees the pixels (as SDL_image does)
+    return s;
+}
+
 static SDL_Surface *imagesurface(uchar *pixels, int w, int h, int channels)
 {
-    SDL_Surface *s = NULL;
     if(channels == 2)
     {
-        s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_RGBA32);
+        SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
         if(s) loop(y, h)
         {
             const uchar *src = pixels + y*w*2;
@@ -334,16 +353,7 @@ static SDL_Surface *imagesurface(uchar *pixels, int w, int h, int channels)
         return s;
     }
     if(channels < 1 || channels > 4) { SDL_free(pixels); return NULL; }
-    s = SDL_CreateRGBSurfaceWithFormatFrom(pixels, w, h, 8*channels, w*channels,
-            channels == 4 ? SDL_PIXELFORMAT_RGBA32 : (channels == 3 ? SDL_PIXELFORMAT_RGB24 : SDL_PIXELFORMAT_INDEX8));
-    if(!s) { SDL_free(pixels); return NULL; }
-    if(s->format->palette) loopi(s->format->palette->ncolors)
-    {
-        SDL_Color &c = s->format->palette->colors[i];
-        c.r = c.g = c.b = i;
-    }
-    s->flags &= ~SDL_PREALLOC; // the surface owns the decoded pixels (allocated with SDL_malloc) and frees them
-    return s;
+    return ownedsurface(pixels, w, h, channels == 4 ? SDL_PIXELFORMAT_RGBA32 : (channels == 3 ? SDL_PIXELFORMAT_RGB24 : SDL_PIXELFORMAT_INDEX8));
 }
 
 static SDL_Surface *loadimage(stream *f)
@@ -372,15 +382,13 @@ SDL_Surface *loadimage(const char *filename) { return loadimage(openrawfile(file
 // returns a copy of s scaled by a factor (rows tightly packed, like the decoded images); frees s
 SDL_Surface *scalesurface(SDL_Surface *s, float scale)
 {
-    uint bpp = s->format->BytesPerPixel, dw = s->w*scale, dh = s->h*scale;
+    uint bpp = surfacebpp(s), dw = s->w*scale, dh = s->h*scale;
     uchar *buf = (uchar *)SDL_malloc(dw*dh*bpp);
     if(!buf) return s;
     scaletexture((uchar *)s->pixels, s->w, s->h, bpp, buf, dw, dh);
-    SDL_Surface *d = SDL_CreateRGBSurfaceWithFormatFrom(buf, dw, dh, 8*bpp, dw*bpp, s->format->format);
-    if(!d) { SDL_free(buf); return s; }
-    if(s->format->palette && d->format->palette) SDL_SetPaletteColors(d->format->palette, s->format->palette->colors, 0, s->format->palette->ncolors);
-    d->flags &= ~SDL_PREALLOC;
-    SDL_FreeSurface(s);
+    SDL_Surface *d = ownedsurface(buf, dw, dh, s->format, SDL_GetSurfacePalette(s));
+    if(!d) return s;
+    SDL_DestroySurface(s);
     return d;
 }
 
@@ -416,16 +424,16 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
     if(strstr(texname,"playermodel")) { fixcl(s, 45); }
     else if(strstr(texname,"skin") && strstr(texname,"weapon")) { fixcl(s, 44); }
 
-    GLenum format = texformat(s->format->BitsPerPixel);
+    GLenum format = texformat(SDL_BITSPERPIXEL(s->format));
     if(!format)
     {
-        SDL_FreeSurface(s);
+        SDL_DestroySurface(s);
         conoutf("texture must be 8, 16, 24, or 32 bpp: %s", texname);
         return 0;
     }
     if(max(s->w, s->h) > (1<<12))
     {
-        SDL_FreeSurface(s);
+        SDL_DestroySurface(s);
         conoutf("texture size exceeded %dx%d pixels: %s", 1<<12, 1<<12, texname);
         return 0;
     }
@@ -434,7 +442,7 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
     {
         const char *cmd = &texname[1], *arg1 = strchr(cmd, ':');//, *arg2 = arg1 ? strchr(arg1, ',') : NULL;
         if(!arg1) arg1 = strchr(cmd, '>');
-        if(!strncmp(cmd, "decal", arg1-cmd)) { s = texdecal(s); format = texformat(s->format->BitsPerPixel); }
+        if(!strncmp(cmd, "decal", arg1-cmd)) { s = texdecal(s); format = texformat(SDL_BITSPERPIXEL(s->format)); }
     }
 
     if(uniformtexres && scale > 1.0f) s = scalesurface(s, 1.0f/scale);
@@ -444,8 +452,8 @@ GLuint loadsurface(const char *texname, int &xs, int &ys, int &bpp, int clamp = 
     createtexture(tnum, s->w, s->h, s->pixels, clamp, mipmap, canreduce, format);
     xs = s->w;
     ys = s->h;
-    bpp = s->format->BitsPerPixel;
-    SDL_FreeSurface(s);
+    bpp = SDL_BITSPERPIXEL(s->format);
+    SDL_DestroySurface(s);
     return tnum;
 }
 

@@ -11,7 +11,7 @@ Requirements: the Xcode command line tools (`xcode-select --install`), plus `cma
 
 ## What the scripts do
 
-- **`build-deps.sh`** downloads SDL2, libogg, libvorbis and OpenAL Soft from their official sources and checks each download against a pinned SHA-256. It builds them **universal** (arm64 + x86_64) for macOS 11+ in `source/macos/deps/universal`. Homebrew libraries can't be shipped: they're built for the build machine's macOS version only and pull in many optional libraries. Textures are decoded by the game itself with stb_image (`source/src/stbimage.cpp`), so there are no image libraries. Everything is static except **OpenAL Soft**. OpenAL Soft is LGPL, so it's built as a shared library (CoreAudio output, built-in HRTF dataset) that the app ships in `Contents/Frameworks`, where it can be replaced.
+- **`build-deps.sh`** downloads SDL3, libogg, libvorbis and OpenAL Soft from their official sources and checks each download against a pinned SHA-256. It builds them **universal** (arm64 + x86_64) for macOS 11+ in `source/macos/deps/universal`. Homebrew libraries can't be shipped: they're built for the build machine's macOS version only and pull in many optional libraries. Textures are decoded by the game itself with stb_image (`source/src/stbimage.cpp`), so there are no image libraries. Everything is static except **OpenAL Soft**. OpenAL Soft is LGPL, so it's built as a shared library (CoreAudio output, built-in HRTF dataset) that the app ships in `Contents/Frameworks`, where it can be replaced.
 - **`make-app.sh`**:
   1. Compiles the client and standalone server once per architecture. Each build happens in its own copy of the source tree under `source/macos/build/obj-<arch>`, so it never interferes with a development build in `source/src`.
   2. Combines the two architectures with `lipo`.
@@ -82,7 +82,7 @@ The only non-system library is the bundled OpenAL Soft, which `make-app.sh` sign
 
 ## Development builds
 
-For day-to-day work you don't need any of this. `cd source/src && make -j client server` builds a native, single-architecture client and server against Homebrew's `sdl2-compat` and `libvorbis`. Run it from the repository root:
+For day-to-day work you don't need any of this. `cd source/src && make -j client server` builds a native, single-architecture client and server against Homebrew's `sdl3` and `libvorbis`. Run it from the repository root:
 
 ```bash
 source/src/ac_client --home="$HOME/Library/Application Support/assaultcube/v1.4" --init

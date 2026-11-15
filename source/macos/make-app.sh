@@ -111,10 +111,11 @@ OpenAL Soft 1.25.2 - GNU LGPL 2 or later (openal-soft-COPYING.txt)
   https://openal-soft.org/openal-releases/openal-soft-1.25.2.tar.bz2 (see source/macos/build-deps.sh in the
   AssaultCube source code). It's a separate shared library: it can be replaced with any other build of OpenAL Soft.
 
-Statically linked (zlib-style licenses): SDL2 2.32.10 (zlib license), stb_image 2.30 (public domain/MIT), libogg 1.3.6 and
+Statically linked: SDL3 3.4.20 (zlib license), stb_image 2.30 (public domain/MIT), libogg 1.3.6 and
 libvorbis 1.3.7 (BSD license). See README.html and docs/package_copyrights.txt for AssaultCube itself.
 
 The license texts in this folder:
+  SDL3-LICENSE.txt                            SDL3
   libogg-COPYING.txt, libvorbis-COPYING.txt   libogg and libvorbis
   enet-LICENSE.txt                            ENet, the network library (MIT license), also statically linked
   stb_image-LICENSE.txt                       stb_image (from the end of source/src/stb_image.h)
@@ -124,9 +125,9 @@ The license texts in this folder:
                                               source/README_CUBEENGINE.txt of the AssaultCube source code
 EOF
 # (a library folder built by an older build-deps.sh lacks some of them: remove source/macos/deps/universal then)
-for f in libogg-COPYING.txt libvorbis-COPYING.txt openal-soft-COPYING.txt openal-soft-BSD-3Clause.txt \
-         openal-soft-pffft-LICENSE.txt openal-soft-gsl-LICENSE.txt openal-soft-fmt-LICENSE.txt enet-LICENSE.txt \
-         stb_image-LICENSE.txt; do
+for f in SDL3-LICENSE.txt libogg-COPYING.txt libvorbis-COPYING.txt openal-soft-COPYING.txt \
+         openal-soft-BSD-3Clause.txt openal-soft-pffft-LICENSE.txt openal-soft-gsl-LICENSE.txt \
+         openal-soft-fmt-LICENSE.txt enet-LICENSE.txt stb_image-LICENSE.txt; do
   [ -s "$RES/licenses/$f" ] || { echo "make-app: licenses/$f is missing (remove source/macos/deps/universal and run again)" >&2; exit 1; }
 done
 

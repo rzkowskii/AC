@@ -310,7 +310,7 @@ bool sbuffer::load(bool trydl)
                 uint32_t wavlen;
                 uint8_t *wavbuf;
 
-                if(!SDL_LoadWAV_RW(f->rwops(), 1, &wavspec, &wavbuf, &wavlen))
+                if(!SDL_LoadWAV_IO(f->rwops(), 1, &wavspec, &wavbuf, &wavlen))
                 {
                     SDL_ClearError();
                     continue;
@@ -319,23 +319,22 @@ bool sbuffer::load(bool trydl)
                 ALenum format;
                 switch(wavspec.format) // map wav header to openal format
                 {
-                    case AUDIO_U8:
-                    case AUDIO_S8:
+                    case SDL_AUDIO_U8:
+                    case SDL_AUDIO_S8:
                         format = wavspec.channels==2 ? AL_FORMAT_STEREO8 : AL_FORMAT_MONO8;
                         break;
-                    case AUDIO_U16:
-                    case AUDIO_S16:
+                    case SDL_AUDIO_S16LE:
                         format = wavspec.channels==2 ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
                         break;
                     default:
-                        SDL_FreeWAV(wavbuf);
+                        SDL_free(wavbuf);
                         delete f;
                         unload();
                         return false;
                 }
 
                 alBufferData(id, format, wavbuf, wavlen, wavspec.freq);
-                SDL_FreeWAV(wavbuf);
+                SDL_free(wavbuf);
                 delete f;
 
                 if(ALERR)

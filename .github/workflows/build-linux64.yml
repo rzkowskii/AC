@@ -8,14 +8,30 @@ jobs:
     name: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: setup libraries
-        run: sudo apt install libsdl2-dev libsdl2-image-dev zlib1g-dev libogg-dev libvorbis-dev libopenal-dev libcurl4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build zlib1g-dev libogg-dev libvorbis-dev libopenal-dev libcurl4 \
+            libx11-dev libgl-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev
+        shell: bash
+
+      - name: SDL3 (not packaged in Ubuntu 24.04; the pinned release the other builds use)
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sdl3.tar.gz" https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz
+          echo "f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f  $RUNNER_TEMP/sdl3.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/sdl3.tar.gz" -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/SDL3-3.4.20" -B "$RUNNER_TEMP/sdl3-build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_EXAMPLES=OFF
+          cmake --build "$RUNNER_TEMP/sdl3-build"
+          sudo cmake --install "$RUNNER_TEMP/sdl3-build"
+          sudo ldconfig
         shell: bash
 
       - name: prepare production build
-        run: sed 's@//#define PRODUCTION@#define PRODUCTION@' source/src/cube.h
+        run: sed -i 's@//#define PRODUCTION@#define PRODUCTION@' source/src/cube.h
         shell: bash
         
       - name: make
@@ -36,7 +52,7 @@ jobs:
         shell: bash
         
       - name: upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux64-binaries
           path: dist

@@ -51,7 +51,7 @@ bool hasDBF = false; // GL_ARB_depth_buffer_float
 
 void *getprocaddress(const char *name)
 {
-    return SDL_GL_GetProcAddress(name);
+    return (void *)SDL_GL_GetProcAddress(name);
 }
 
 bool hasext(const char *exts, const char *ext)

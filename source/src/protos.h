@@ -140,7 +140,7 @@ extern int conopen;
 extern stream *clientlogfile;
 extern vector<char> *bootclientlog;
 
-extern void keypress(int keycode, int scancode, bool isdown, SDL_Keymod mod = KMOD_NONE);
+extern void keypress(int keycode, int scancode, bool isdown, SDL_Keymod mod = SDL_KMOD_NONE);
 extern int rendercommand(int x, int y, int w);
 extern void renderconsole();
 extern char *getcurcommand(int *pos);
@@ -189,7 +189,7 @@ extern void menusettabname(char * tabname);
 extern bool needscoresreorder;
 extern void menuheader(void *menu, char *header, char *footer, bool heap = false);
 extern void menusay(const char *text);
-extern bool menukey(int code, bool isdown = true, SDL_Keymod mod = KMOD_NONE);
+extern bool menukey(int code, bool isdown = true, SDL_Keymod mod = SDL_KMOD_NONE);
 extern void *addmenu(const char *name, const char *title = NULL, bool allowinput = true, void (__cdecl *refreshfunc)(void *, bool) = NULL, bool (__cdecl *keyfunc)(void *, int, bool) = NULL, bool hotkeys = false, bool forwardkeys = false);
 extern void rendermenumdl();
 extern void menuset(void *m, bool save = true);

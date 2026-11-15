@@ -20,7 +20,7 @@ CUBE readme:                              source/README_CUBEENGINE.txt
 Cube Bots readme:                         docs/cube_bot-readme.txt
 ENet license:                             source/enet/LICENSE
 SDL readme:                               bin_win32/README-SDL.txt
-SDL license:                              source/include/SDL_copying.h
+SDL license:                              bin_win32/LICENSE.SDL3.txt, source/include/SDL3/SDL_copying.h
 stb_image license:                        source/src/stb_image.h (at the end of the file)
 zlib license:                             bin_win32/LICENSE.zlib.txt
 Vorbis/Ogg license:                       bin_win32/LICENSE.vorbis_ogg.txt

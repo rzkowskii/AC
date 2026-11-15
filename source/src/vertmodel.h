@@ -1110,7 +1110,7 @@ struct vertmodel : model
             defformatstring(imgname)("%s_%d.bmp", model->loadname, frame);
             for(char *s; (s = strchr(imgname, '/'));) *s = '_';
             SDL_SaveBMP(img, imgname);
-            SDL_FreeSurface(img);
+            SDL_DestroySurface(img);
 #endif
             if(aasize > 1<<dynshadowsize)
                 scaletexture(pixels, aasize, aasize, 1, pixels, 1<<dynshadowsize, 1<<dynshadowsize);

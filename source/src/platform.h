@@ -39,17 +39,16 @@
 #endif
 
 #ifndef STANDALONE
-    #include <SDL.h>
-
-    #ifdef __APPLE__
-        #undef SDL_VIDEO_DRIVER_WINDOWS
+    #include <SDL3/SDL.h>
+    #if !defined(WIN32) && !defined(__APPLE__)
+        #define AC_X11_GRAB         // X11 pointer-grab workaround (main.cpp, sdl_xgrab_bug); SDL2's SDL_syswm.h used to include Xlib
+        #include <X11/Xlib.h>
     #endif
-	#include <SDL_syswm.h>
 
     #define GL_GLEXT_LEGACY
     #define __glext_h__
     #define NO_SDL_GLEXT
-    #include <SDL_opengl.h>
+    #include <SDL3/SDL_opengl.h>
     #undef __glext_h__
 
     #include "GL/glext.h"
@@ -67,12 +66,12 @@
         #else
             #include "Vorbis/vorbisfile.h"  // legacy Vorbis.framework (Xcode project)
         #endif
-        #define MOD_KEYS_CTRL (KMOD_LGUI|KMOD_RGUI)
+        #define MOD_KEYS_CTRL (SDL_KMOD_LGUI|SDL_KMOD_RGUI)
     #else
         #include "AL/al.h"
         #include "AL/alc.h"
         #include "vorbis/vorbisfile.h"
-        #define MOD_KEYS_CTRL (KMOD_LCTRL|KMOD_RCTRL)
+        #define MOD_KEYS_CTRL (SDL_KMOD_LCTRL|SDL_KMOD_RCTRL)
     #endif
 
     #include <setjmp.h>

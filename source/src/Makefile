@@ -92,20 +92,22 @@ CLIENT_INCLUDES= $(INCLUDES) -I../include
 CLIENT_LIBS= -mwindows -L../lib -lSDL2 -lSDL2_image -lzdll -lopengl32 -lenet -lOpenAL32 -llibvorbisfile -lws2_32 -lwinmm
 else ifeq ($(PLATFORM),Darwin)
 # Native macOS build (arm64 on Apple Silicon, x86_64 on Intel).
-# By default it links against Homebrew/MacPorts SDL2 and libvorbis (sdl2-config in PATH) - fine for development.
+# By default it links against Homebrew's SDL3 and libvorbis - fine for development.
 # For a distributable build, source/macos/make-app.sh sets MACOS_DEPS to the universal static libraries made by
 # source/macos/build-deps.sh, and MACOS_ARCH to the architecture being built (one build per architecture, then lipo).
 ifdef MACOS_DEPS
-SDL2_CONFIG?= $(MACOS_DEPS)/bin/sdl2-config
-# (static SDL2's sdl2-config omits the frameworks used by its game controller and rumble support)
-SDL2_LIBS= `$(SDL2_CONFIG) --static-libs` -Wl,-weak_framework,GameController -Wl,-weak_framework,CoreHaptics
+# static SDL3, plus the system frameworks it needs (from its pkg-config file; pkg-config itself isn't required)
+SDL_CFLAGS= -I$(MACOS_DEPS)/include
+SDL_LIBS= $(MACOS_DEPS)/lib/libSDL3.a $(shell sed -n 's/^Libs.private: //p' $(MACOS_DEPS)/lib/pkgconfig/sdl3.pc)
 # OpenAL Soft (HRTF 3D audio) instead of Apple's deprecated OpenAL.framework; the app ships it in Contents/Frameworks
 MACOS_DEPS_INCLUDES= -I$(MACOS_DEPS)/include -DAC_OPENAL_SOFT
 MACOS_DEPS_LIBS= -L$(MACOS_DEPS)/lib
 MACOS_OPENAL= -lopenal -Wl,-rpath,@executable_path/../Frameworks
 else
-SDL2_CONFIG?= sdl2-config
-SDL2_LIBS= `$(SDL2_CONFIG) --libs`
+# Homebrew (or MacPorts with PREFIX=/opt/local): SDL3, libvorbis
+PREFIX?= $(shell brew --prefix 2>/dev/null || echo /usr/local)
+SDL_CFLAGS= -I$(PREFIX)/include
+SDL_LIBS= -L$(PREFIX)/lib -lSDL3
 MACOS_OPENAL= -framework OpenAL
 endif
 ifdef MACOS_ARCH
@@ -120,12 +122,14 @@ ifeq ($(MACOS_ARCH),x86_64)
 override CXXFLAGS+= -march=x86-64-v2
 endif
 endif
-CLIENT_INCLUDES= $(INCLUDES) `$(SDL2_CONFIG) --cflags` $(MACOS_DEPS_INCLUDES) -idirafter ../include
-CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) $(SDL2_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
+CLIENT_INCLUDES= $(INCLUDES) $(SDL_CFLAGS) $(MACOS_DEPS_INCLUDES) -idirafter ../include
+CLIENT_LIBS= -L../enet/.libs -lenet $(MACOS_DEPS_LIBS) $(SDL_LIBS) -lz -lvorbisfile -lvorbis -logg -framework OpenGL $(MACOS_OPENAL)
 else
 USRLIB=$(shell if [ -e /usr/lib64 ]; then echo "/usr/lib64"; else echo "/usr/lib"; fi)
-CLIENT_INCLUDES= $(INCLUDES) -I/usr/include `sdl2-config --cflags` -idirafter ../include
-CLIENT_LIBS= -L../enet/.libs -lenet -L$(USRLIB) -lX11 `sdl2-config --libs` -lz -lGL -lopenal -lvorbisfile
+SDL_CFLAGS= `pkg-config --cflags sdl3`
+SDL_LIBS= `pkg-config --libs sdl3`
+CLIENT_INCLUDES= $(INCLUDES) -I/usr/include $(SDL_CFLAGS) -idirafter ../include
+CLIENT_LIBS= -L../enet/.libs -lenet -L$(USRLIB) -lX11 $(SDL_LIBS) -lz -lGL -lopenal -lvorbisfile
 endif
 
 CLIENT_OBJS= \
@@ -193,8 +197,8 @@ SERVER_INCLUDES= -DSTANDALONE $(INCLUDES) -I../include
 SERVER_LIBS= -L../lib -lzdll -lenet -lws2_32 -lwinmm
 else ifeq ($(PLATFORM),Darwin)
 # macOS lacks unnamed POSIX semaphores, so the standalone server uses SDL threads there (see platform.h)
-SERVER_INCLUDES= -DSTANDALONE $(INCLUDES) `$(SDL2_CONFIG) --cflags`
-SERVER_LIBS= -L../enet/.libs -lenet -lz $(SDL2_LIBS)
+SERVER_INCLUDES= -DSTANDALONE $(INCLUDES) $(SDL_CFLAGS)
+SERVER_LIBS= -L../enet/.libs -lenet -lz $(SDL_LIBS)
 else
 SERVER_INCLUDES= -DSTANDALONE $(INCLUDES)
 # use with clang:v10.x

@@ -33,8 +33,7 @@
 				</ResourceCompiler>
 				<Linker>
 					<Add option="-mwindows" />
-					<Add library="SDL2main" />
-					<Add library="SDL2" />
+					<Add library="SDL3" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
 					<Add library="OpenAL32" />
@@ -64,8 +63,7 @@
 					<Add directory="../vcpp" />
 				</ResourceCompiler>
 				<Linker>
-					<Add library="SDL2main" />
-					<Add library="SDL2" />
+					<Add library="SDL3" />
 					<Add library="zdll" />
 					<Add library="opengl32" />
 					<Add library="OpenAL32" />
@@ -95,7 +93,7 @@
 					<Add directory="../vcpp" />
 				</ResourceCompiler>
 				<Linker>
-					<Add library="SDL2" />
+					<Add library="SDL3" />
 					<Add library="zdll" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />
@@ -123,7 +121,7 @@
 					<Add directory="../vcpp" />
 				</ResourceCompiler>
 				<Linker>
-					<Add library="SDL2" />
+					<Add library="SDL3" />
 					<Add library="zdll" />
 					<Add library="ws2_32" />
 					<Add library="winmm" />

@@ -21,7 +21,7 @@ JOBS="$(sysctl -n hw.ncpu)"
 
 # name | url | sha256 (cross-checked against Homebrew formulae and GitHub release digests)
 PACKAGES=(
-  "SDL2-2.32.10|https://github.com/libsdl-org/SDL/releases/download/release-2.32.10/SDL2-2.32.10.tar.gz|5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165"
+  "SDL3-3.4.20|https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz|f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f"
   "libogg-1.3.6|https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz|83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638"
   "libvorbis-1.3.7|https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz|b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b"
   "openal-soft-1.25.2|https://openal-soft.org/openal-releases/openal-soft-1.25.2.tar.bz2|1dbaac44e7579d5bc8847ca8db4b2e8b9fd3961041f35ee20def4958301e1089"
@@ -83,7 +83,7 @@ for p in "${PACKAGES[@]}"; do
   fetch "$name" "$url" "$sha"
 done
 
-cmakebuild SDL2-2.32.10 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
+cmakebuild SDL3-3.4.20 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
 
 # (no SDL_image: the game decodes PNG and JPEG textures itself with stb_image, source/src/stbimage.cpp)
 
@@ -108,6 +108,7 @@ cmakebuild openal-soft-1.25.2 -DLIBTYPE=SHARED -DCMAKE_FIND_FRAMEWORK=LAST -DHAV
 
 # licenses, shipped with the app (OpenAL Soft contains code under BSD and MIT licenses: its FFT, GSL and {fmt})
 mkdir -p "$PREFIX/share/licenses"
+cp "$(srcdir SDL3-3.4.20)/LICENSE.txt" "$PREFIX/share/licenses/SDL3-LICENSE.txt"
 cp "$(srcdir libogg-1.3.6)/COPYING" "$PREFIX/share/licenses/libogg-COPYING.txt"
 cp "$(srcdir libvorbis-1.3.7)/COPYING" "$PREFIX/share/licenses/libvorbis-COPYING.txt"
 cp "$(srcdir openal-soft-1.25.2)/COPYING" "$PREFIX/share/licenses/openal-soft-COPYING.txt"

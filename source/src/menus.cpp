@@ -1133,8 +1133,8 @@ COMMAND(menuselectiondescbgcolor, "ssss");
 static bool iskeypressed(int key)
 {
     int numkeys = 0;
-    Uint8 const* state = SDL_GetKeyboardState(&numkeys);
-    return key < numkeys && state[key] != 0;
+    const bool *state = SDL_GetKeyboardState(&numkeys);
+    return key < numkeys && state[key];
 }
 
 void menusay(const char *text)
@@ -1219,7 +1219,7 @@ bool menukey(int code, bool isdown, SDL_Keymod mod)
              * we /hope/ arrow-keys and mouse-scroll are the more natural navigation through items anyway
             case SDLK_TAB:
                 if(!curmenu->allowinput) return false;
-                if(mod & KMOD_LSHIFT) menusel = movemenuselection(menusel, -1);
+                if(mod & SDL_KMOD_LSHIFT) menusel = movemenuselection(menusel, -1);
                 else menusel = movemenuselection(menusel, 1);
                 break;
              *

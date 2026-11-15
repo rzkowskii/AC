@@ -719,8 +719,9 @@ bool glmatrixf::invert(const glmatrixf &m, float mindet)
 // the standalone linux version uses native linux libraries - and also makes use of shared memory
 
 #ifdef AC_USE_SDL_THREADS
-    #include "SDL_timer.h"
-    #include "SDL_thread.h"      // also fetches SDL_mutex.h
+    #include <SDL3/SDL_timer.h>
+    #include <SDL3/SDL_thread.h>
+    #include <SDL3/SDL_mutex.h>
 #else
     #include <pthread.h>
     #include <semaphore.h>
@@ -744,32 +745,32 @@ sl_semaphore::sl_semaphore(int init, int *ecnt)
 
 sl_semaphore::~sl_semaphore()
 {
-    if(data && !sl_skipsemaphoredestroy) SDL_DestroySemaphore((SDL_sem *) data);
+    if(data && !sl_skipsemaphoredestroy) SDL_DestroySemaphore((SDL_Semaphore *) data);
 }
 
 void sl_semaphore::wait()
 {
-    if(SDL_SemWait((SDL_sem *) data) != 0) (*errorcount)++;
+    SDL_WaitSemaphore((SDL_Semaphore *) data);
 }
 
 int sl_semaphore::trywait()
 {
-    return SDL_SemTryWait((SDL_sem *) data);
+    return SDL_TryWaitSemaphore((SDL_Semaphore *) data) ? 0 : 1; // 0: acquired (as with SDL2 and POSIX)
 }
 
 int sl_semaphore::timedwait(int howlongmillis)
 {
-    return SDL_SemWaitTimeout((SDL_sem *) data, howlongmillis);
+    return SDL_WaitSemaphoreTimeout((SDL_Semaphore *) data, howlongmillis) ? 0 : 1; // 0: acquired, 1: timed out
 }
 
 int sl_semaphore::getvalue()
 {
-    return SDL_SemValue((SDL_sem *) data);
+    return SDL_GetSemaphoreValue((SDL_Semaphore *) data);
 }
 
 void sl_semaphore::post()
 {
-    if(SDL_SemPost((SDL_sem *) data) != 0) (*errorcount)++;
+    SDL_SignalSemaphore((SDL_Semaphore *) data);
 }
 #else
 sl_semaphore::sl_semaphore(int init, int *ecnt)
@@ -881,8 +882,8 @@ void sl_detachthread(void *ti) // SDL can't actually detach threads, so this is 
     }
 }
 
-static SDL_threadID mainthreadid = SDL_ThreadID();
-bool ismainthread() { return mainthreadid == SDL_ThreadID(); }
+static SDL_ThreadID mainthreadid = SDL_GetCurrentThreadID();
+bool ismainthread() { return mainthreadid == SDL_GetCurrentThreadID(); }
 
 #else
 struct sl_threadinfo { int (*fn)(void *); void *data; pthread_t handle; int res; volatile char done; };

@@ -1,7 +1,7 @@
 // stbimage.cpp: PNG and JPEG decoding for textures, with stb_image configured the way SDL2_image's STB backend
 // configures it (SDL2_image 2.8.12, src/IMG_stb.c), the decoder the macOS app has always shipped with.
 
-#include <SDL.h> // (not cube.h: its macros would collide with stb_image's code)
+#include <SDL3/SDL.h> // (not cube.h: its macros would collide with stb_image's code)
 
 typedef unsigned char uchar;
 static inline int clampint(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }

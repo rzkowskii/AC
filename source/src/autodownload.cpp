@@ -64,7 +64,7 @@ void getpckserver() // return a table of all package servers with four columns
 }
 COMMAND(getpckserver, "");
 
-SDL_mutex *pckpinglog_lock; // auxilliary locking for pckping_log
+SDL_Mutex *pckpinglog_lock; // auxilliary locking for pckping_log
 vector<char> pckping_log; // access controlled by sem_pckservers (and pckpinglog_lock)
 const char *updatestxt = "/updates.txt";
 
@@ -75,10 +75,10 @@ int pingpckserver(void *data) // fetch updates.txt from a media server, measure 
     pckserver *s = (pckserver *)data;
     u.set(s->host);
     s->resolved = h.set_host(u.domain) ? 1 : 0;
-    SDL_mutexP(pckpinglog_lock);
+    SDL_LockMutex(pckpinglog_lock);
     string b;
     cvecprintf(pckping_log, "lresolving hostname %s %s (%s)\n", u.domain, s->resolved ? "succeeded" : "failed", iptoa(ENET_NET_TO_HOST_32(h.ip.host), b));
-    SDL_mutexV(pckpinglog_lock);
+    SDL_UnlockMutex(pckpinglog_lock);
     if(s->resolved)
     {
         if(*u.port) h.set_port(atoi(u.port));
@@ -87,12 +87,12 @@ int pingpckserver(void *data) // fetch updates.txt from a media server, measure 
         if(res >= 0 && h.response > 0)
         {
             s->ping = h.elapsedtime;
-            SDL_mutexP(pckpinglog_lock);
+            SDL_LockMutex(pckpinglog_lock);
             cvecprintf(pckping_log, "lhttp head %s:%d%s response time: %d, status: %d, contentlength: %d\n", u.domain, h.ip.port, url, s->ping, h.response, h.contentlength);
 #ifdef _DEBUG
             if(DEBUGCOND) { cvecprintf(pckping_log, "l%s", escapestring(h.header, true, true)); pckping_log.add('\n'); }
 #endif
-            SDL_mutexV(pckpinglog_lock);
+            SDL_UnlockMutex(pckpinglog_lock);
             if(h.response == 200)
             {
                 h.outvec = new vector<uchar>;
@@ -102,13 +102,13 @@ int pingpckserver(void *data) // fetch updates.txt from a media server, measure 
                     h.outvec->add('\0');
                     s->updates.clear();
                     parseupdatelist(s->updates, (char *)h.outvec->getbuf()); // don't filter entries
-                    SDL_mutexP(pckpinglog_lock);
+                    SDL_LockMutex(pckpinglog_lock);
                     cvecprintf(pckping_log, "lgot %s:%d%s: %d bytes, %d valid update lines\n", u.domain, h.ip.port, url, res, s->updates.numelems);
-                    SDL_mutexV(pckpinglog_lock);
+                    SDL_UnlockMutex(pckpinglog_lock);
                 }
                 else
                 {
-                    SDL_mutexP(pckpinglog_lock);
+                    SDL_LockMutex(pckpinglog_lock);
                     cvecprintf(pckping_log, "lretrieving %s:%d%s failed: response %d, err: %s\n", u.domain, h.ip.port, url, h.response, h.err ? h.err : "(null)");
 #ifdef _DEBUG
                     if(DEBUGCOND)
@@ -117,16 +117,16 @@ int pingpckserver(void *data) // fetch updates.txt from a media server, measure 
                         cvecprintf(pckping_log, "lheader: %s", escapestring(h.header ? h.header : h.rawrec.getbuf(), true, true)); pckping_log.add('\n');
                     }
 #endif
-                    SDL_mutexV(pckpinglog_lock);
+                    SDL_UnlockMutex(pckpinglog_lock);
                 }
                 DELETEP(h.outvec);
             }
         }
         else
         { // connection to server failed
-            SDL_mutexP(pckpinglog_lock);
+            SDL_LockMutex(pckpinglog_lock);
             cvecprintf(pckping_log, "lpinging %s failed, err: %s\n", s->host, h.err ? h.err : "(null)");
-            SDL_mutexV(pckpinglog_lock);
+            SDL_UnlockMutex(pckpinglog_lock);
         }
     }
     h.disconnect();
