@@ -1075,6 +1075,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     transplayer();
     readmatrices();
+    rpmark(RP_SETUP);
 
     if(!underwater && effective_waterreflect && !isoverview)
     {
@@ -1086,6 +1087,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
             if(waterrefract) drawreflection(hf, w, h, changelod, true);
         }
     }
+    rpmark(RP_REFLECTION);
 
     if(effective_stencilshadow && hasstencil && stencilbits >= 8) glClearStencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);
     glClear((outsidemap(camera1) ? GL_COLOR_BUFFER_BIT : 0) | GL_DEPTH_BUFFER_BIT | (effective_stencilshadow && hasstencil && stencilbits >= 8 ? GL_STENCIL_BUFFER_BIT : 0));
@@ -1096,6 +1098,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
 
     render_world(camera1->o.x, camera1->o.y, camera1->o.z, changelod,
             (int)camera1->yaw, (int)camera1->pitch, dynfov(), fovy, w, h);
+    rpmark(RP_WORLDGEN);
 
     setupstrips();
 
@@ -1118,7 +1121,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     setuptmu(0, "T * P x 2");
 
     renderstrips();
-
+    rpmark(RP_WORLDDRAW);
 
     xtraverts = 0;
 
@@ -1131,8 +1134,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     startmodelbatches();
     rendereditentities();
     endmodelbatches();
+    rpmark(RP_MAPMODELS);
 
     readdepth(w, h, worldpos);
+    rpmark(RP_DEPTHREAD);
 
     startmodelbatches();
     renderclients();
@@ -1144,8 +1149,10 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     endmodelbatches();
 
     WaypointClass.Think();// Rick: Need to do here because of drawing the waypoints
-    
+    rpmark(RP_MODELS);
+
     drawhudgun();
+    rpmark(RP_HUDGUN);
 
     resettmu(0);
 
@@ -1156,6 +1163,7 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     int nquads = renderwater(hf, !effective_waterreflect || underwater || isoverview ? 0 : reflecttex, !effective_waterreflect || !waterrefract || underwater || isoverview ? 0 : refracttex);
 
     render_particles(curtime, ~PT_DECAL_MASK);
+    rpmark(RP_EFFECTS);
 
     glDisable(GL_FOG);
     glDisable(GL_TEXTURE_2D);
@@ -1181,5 +1189,6 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     if(!isoverview) glEnable(GL_FOG);
 
     undodynlights();
+    rpmark(RP_HUD);
 }
 

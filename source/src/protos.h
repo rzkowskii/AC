@@ -404,6 +404,12 @@ extern void framedquadtexture(GLuint tex, int x, int y, int xs, int ys, int bord
 extern void setperspective(float fovy, float aspect, float nearplane, float farplane);
 extern void sethudgunperspective(bool on);
 extern void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed);
+
+// renderer profile (main.cpp): while a "benchmark" runs, the CPU time of each frame phase is accumulated;
+// rpmark(phase) charges the time since the previous mark to that phase
+enum { RP_UPDATE = 0, RP_OCCLUSION, RP_OTHER, RP_SETUP, RP_REFLECTION, RP_WORLDGEN, RP_WORLDDRAW, RP_MAPMODELS, RP_DEPTHREAD,
+       RP_MODELS, RP_HUDGUN, RP_EFFECTS, RP_HUD, RP_SWAP, RP_NUM };
+extern void rpmark(int phase);
 extern double hrclockms();
 extern void clearminimap();
 extern void resetzones();

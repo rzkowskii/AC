@@ -884,6 +884,126 @@ double hrclockms()
     return startms + double(now - start) * msperticks;
 }
 
+// frame-time benchmark: "benchmark <seconds>" records real frame times, e.g. during demo playback
+// ("demo <name>; benchmark 60"), then prints average fps, 1%/0.1% lows and frame-time percentiles.
+// "benchmark 0" stops a running benchmark early and prints the result so far.
+static vector<float> benchframes;
+static double benchstart = -1, benchprev = -1;
+static int benchseconds = 0;
+static bool benchactive = false;
+
+static int benchcmp(const float *a, const float *b) { return *a < *b ? 1 : (*a > *b ? -1 : 0); } // slowest frame first
+
+// "x% low": average fps over the slowest x% of frames
+static double benchlowfps(vector<float> &slowestfirst, double fraction)
+{
+    int k = max(1, int(slowestfirst.length() * fraction));
+    double t = 0;
+    loopi(k) t += slowestfirst[i];
+    return t > 0 ? 1000.0 * k / t : 0;
+}
+
+static void benchreport()
+{
+    benchactive = false;
+    benchprev = -1;
+    int n = benchframes.length();
+    if(n < 10) { conoutf("benchmark: not enough frames recorded (%d)", n); benchframes.setsize(0); return; }
+    double total = 0;
+    loopv(benchframes) total += benchframes[i];
+    benchframes.sort(benchcmp);
+    extern int maxfps, vsync;
+    conoutf("benchmark: %d frames in %.1f s: avg %.1f fps (%.3f ms), 1%% low %.1f fps, 0.1%% low %.1f fps",
+            n, total / 1000.0, 1000.0 * n / total, total / n, benchlowfps(benchframes, 0.01), benchlowfps(benchframes, 0.001));
+    conoutf("benchmark: frame time median %.3f ms, 99th percentile %.3f ms, 99.9th percentile %.3f ms, worst %.3f ms (maxfps %d, vsync %d, %dx%d)",
+            benchframes[n / 2], benchframes[n / 100], benchframes[n / 1000], benchframes[0], maxfps, vsync, screenw, screenh);
+    benchframes.setsize(0);
+}
+
+// renderer profile: CPU time per frame phase while a benchmark runs (see rpmark() in protos.h)
+static const char *rpnames[RP_NUM] = { "game update + input", "occlusion rays", "audio, network, other", "frame setup + dynamic lights",
+    "water reflection", "world geometry (CPU)", "world draw calls", "map models + shadows", "depth readback", "players + items",
+    "HUD gun", "particles + water", "HUD + text", "swap / present" };
+static double rpacc[RP_NUM], rpcpu[RP_NUM], rplast = 0, rpcpulast = 0;
+static int rpframes = 0;
+
+// CPU time used by the calling thread: compared with wall time, it shows whether a phase is busy or waiting (on the GPU)
+static double threadcpums()
+{
+#ifdef CLOCK_THREAD_CPUTIME_ID
+    struct timespec ts;
+    if(!clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts)) return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
+#endif
+    return 0;
+}
+
+void rpmark(int phase)
+{
+    if(!benchactive) return;
+    double t = hrclockms(), c = threadcpums();
+    rpacc[phase] += t - rplast;
+    rpcpu[phase] += c - rpcpulast;
+    rplast = t;
+    rpcpulast = c;
+}
+
+static void rpreport()
+{
+    if(rpframes <= 0) return;
+    double total = 0, totalcpu = 0;
+    loopi(RP_NUM) { total += rpacc[i]; totalcpu += rpcpu[i]; }
+    conoutf("benchmark: main thread time per frame by phase (avg over %d frames: %.3f ms, of which %.0f%% busy on the CPU):",
+            rpframes, total / rpframes, total > 0 ? 100 * totalcpu / total : 0);
+    loopi(RP_NUM) if(rpacc[i] / rpframes >= 0.0005)
+        conoutf("benchmark:   %-36s %7.3f ms %5.1f%%  (CPU busy %3.0f%%)", rpnames[i], rpacc[i] / rpframes, total > 0 ? 100 * rpacc[i] / total : 0,
+                rpacc[i] > 0 ? min(100.0, 100 * rpcpu[i] / rpacc[i]) : 0);
+}
+
+// optional camera spin: one full turn over the benchmark, from the current position (singleplayer only)
+static bool benchspin = false;
+static float benchspinyaw = 0;
+
+static void benchframe(double now) // called once per frame with the frame's start time
+{
+    if(!benchactive) return;
+    if(benchprev >= 0) { benchframes.add(float(now - benchprev)); rpframes++; }
+    else
+    {
+        benchstart = now;
+        loopi(RP_NUM) rpacc[i] = rpcpu[i] = 0;
+        rpframes = 0;
+    }
+    benchprev = now;
+    rplast = now;
+    rpcpulast = threadcpums();
+    if(benchspin && !multiplayer(NULL))
+    {
+        float yaw = benchspinyaw + 360.0f * float((now - benchstart) / (benchseconds * 1000.0));
+        player1->yaw = camera1->yaw = fmodf(yaw, 360.0f);
+    }
+    if(now - benchstart >= benchseconds * 1000.0)
+    {
+        rpreport();
+        benchreport();
+    }
+}
+
+void benchmark(int *seconds, int *spin)
+{
+    if(benchactive) { rpreport(); benchreport(); }
+    else if(*seconds <= 0) conoutf("benchmark: not running");
+    if(*seconds <= 0) return;
+    benchframes.setsize(0);
+    benchseconds = *seconds;
+    benchprev = -1;
+    benchspin = *spin != 0;
+    if(benchspin && multiplayer(NULL)) { conoutf("benchmark: the camera spin is only available in singleplayer"); benchspin = false; }
+    benchspinyaw = player1->yaw;
+    benchactive = true;
+    conoutf("benchmark: recording frame times for %d seconds%s", benchseconds, benchspin ? ", turning the camera through 360 degrees" : "");
+}
+COMMAND(benchmark, "ii");
+
 #ifndef WIN32
 #include <sched.h>
 #endif
@@ -1734,6 +1854,7 @@ int main(int argc, char **argv)
         static float fps = 10.0f;
         limitfps(); // wait for this frame's start first, then read the clock: the frame time is measured, not assumed
         double framestart = hrclockms();
+        benchframe(framestart);
         double realmillis = framestart - clockrealbase;
         if(clockfix) realmillis *= double(clockerror)/1000000;
         int millis = int(realmillis) + clockvirtbase;
@@ -1770,6 +1891,7 @@ int main(int argc, char **argv)
         checkinput();
 
         if(lastmillis) updateworld(curtime, lastmillis);
+        rpmark(RP_UPDATE);
 
         if(needsautoscreenshot) showscores(true);
 
@@ -1779,12 +1901,15 @@ int main(int argc, char **argv)
         frames++;
 
         audiomgr.updateaudio();
+        rpmark(RP_OTHER);
 
         computeraytable(camera1->o.x, camera1->o.y, dynfov());
+        rpmark(RP_OCCLUSION);
         if(frames>3 && !minimized)
         {
             gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
             if(frames>4) SDL_GL_SwapWindow(screen);
+            rpmark(RP_SWAP);
         }
 
         if(needsautoscreenshot)
