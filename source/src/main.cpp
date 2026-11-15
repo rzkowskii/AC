@@ -692,16 +692,24 @@ int setgamma(int newgamma) // replacement for SDL_SetGamma
     return screen ? SDL_SetWindowBrightness(screen, newgamma/100.0f) : -1;
 }
 
-static int curgamma = 100;
+static int curgamma = 100; // what the hardware gamma ramp is set to
 
-VARNFP(gamma, vgamma, 30, 100, 300,
+// "gamma" is applied by a post-processing shader where possible ("gammashader", postfx.cpp): it then only affects the
+// game's image. Otherwise the hardware gamma ramp of the display is used, as before (not available on Wayland or with
+// SDL3's sdl2-compat).
+void applygamma()
 {
-    if(vgamma != curgamma)
+    extern int vgamma;
+    extern bool postfxgamma();
+    int hw = postfxgamma() ? 100 : vgamma;
+    if(hw != curgamma)
     {
-        if(setgamma(vgamma) == -1) conoutf("Could not set gamma: %s", SDL_GetError());
-        curgamma = vgamma;
+        if(setgamma(hw) == -1) conoutf("Could not set gamma: %s", SDL_GetError());
+        curgamma = hw;
     }
-});
+}
+
+VARNFP(gamma, vgamma, 30, 100, 300, applygamma());
 
 void restoregamma()
 {
@@ -710,6 +718,7 @@ void restoregamma()
         setgamma(100);
         setgamma(curgamma);
     }
+    applygamma();
 }
 
 void getdisplayresolutions()

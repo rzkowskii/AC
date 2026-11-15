@@ -430,6 +430,10 @@
 		<Unit filename="../enet/win32.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="../src/postfx.cpp">
+			<Option target="default" />
+			<Option target="debug" />
+		</Unit>
 		<Unit filename="../src/rendergl.cpp">
 			<Option target="default" />
 			<Option target="debug" />

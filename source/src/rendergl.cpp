@@ -1050,6 +1050,8 @@ void cleanupgl()
     cleanupreflectfbos();
     minimapdirty = true;
     cleanupdepthread();
+    extern void cleanuppostfx();
+    cleanuppostfx();
 }
 
 void drawzone(int *x1, int *x2, int *y1, int *y2, int *color)
@@ -1560,8 +1562,13 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
     extern vector<int> tagclipcubes;
     tagclipcubes.setsize(0);
 
+    extern void renderpostfxscene(int w, int h), renderpostfxfinal(int w, int h);
+    renderpostfxscene(w, h); // FXAA: the 3D scene only, the HUD stays sharp
+
     extern vector<vertex> verts;
     gl_drawhud(w, h, int(curfps + 0.5f), nquads, verts.length(), underwater, elapsed);
+
+    renderpostfxfinal(w, h); // gamma: everything
 
     glEnable(GL_CULL_FACE);
     if(!isoverview) glEnable(GL_FOG);
