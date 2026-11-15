@@ -13,6 +13,9 @@ const int dbgvlight = 0;
 //VAR(dbgvlight, 0, 0, 1);
 
 VARP(mdldlist, 0, 1, 1);
+// "mdlvbo 1": static model meshes (map models, pickups) are drawn from vertex and index buffers in GPU memory. Apple's
+// OpenGL replays display lists by streaming their vertices to the GPU again on every glCallList.
+VARP(mdlvbo, 0, 1, 1);
 
 // With multisampling, alpha-tested skins (fences, foliage) also use alpha-to-coverage: their cut-out edges get the same
 // antialiasing as polygon edges. The alpha test itself stays, so what is solid and what is see-through doesn't change.
@@ -152,8 +155,9 @@ struct vertmodel : model
         int numdyndraws;
         GLuint statlist;
         int statlen;
+        GLuint statvbo, statibo; // frame 0 positions + texture coordinates, and dynidx, in buffer objects (mdlvbo)
 
-        mesh() : name(0), owner(0), verts(0), tcverts(0), bbs(0), shareverts(0), tris(0), skin(notexture), tex(0), dynidx(0), dyndraws(0), statlist(0)
+        mesh() : name(0), owner(0), verts(0), tcverts(0), bbs(0), shareverts(0), tris(0), skin(notexture), tex(0), dynidx(0), dyndraws(0), statlist(0), statvbo(0), statibo(0)
         {
         }
 
@@ -166,6 +170,7 @@ struct vertmodel : model
             DELETEA(shareverts);
             DELETEA(tris);
             if(statlist) glDeleteLists(statlist, 1);
+            deletestatbuffers();
             DELETEA(dynidx);
             DELETEA(dyndraws);
         }
@@ -294,13 +299,71 @@ struct vertmodel : model
         }
 
 
+        void deletestatbuffers()
+        {
+            if(statvbo) glDeleteBuffers_(1, &statvbo);
+            if(statibo) glDeleteBuffers_(1, &statibo);
+            statvbo = statibo = 0;
+        }
+
         void cleanup()
         {
             if(statlist)
             {
-                glDeleteLists(1, statlist);
+                glDeleteLists(statlist, 1);
                 statlist = 0;
             }
+            deletestatbuffers();
+        }
+
+        // draws the static frame from buffer objects; false if they can't be used
+        bool renderstatbuffers()
+        {
+            if(!statvbo)
+            {
+                glGenBuffers_(1, &statvbo);
+                glGenBuffers_(1, &statibo);
+                glBindBuffer_(GL_ARRAY_BUFFER_ARB, statvbo);
+                glBufferData_(GL_ARRAY_BUFFER_ARB, numverts*(sizeof(vec) + sizeof(tcvert)), NULL, GL_STATIC_DRAW_ARB);
+                glBufferSubData_(GL_ARRAY_BUFFER_ARB, 0, numverts*sizeof(vec), verts);
+                glBufferSubData_(GL_ARRAY_BUFFER_ARB, numverts*sizeof(vec), numverts*sizeof(tcvert), tcverts);
+                glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
+                glBufferData_(GL_ELEMENT_ARRAY_BUFFER_ARB, dynlen*sizeof(ushort), dynidx, GL_STATIC_DRAW_ARB);
+            }
+            else
+            {
+                glBindBuffer_(GL_ARRAY_BUFFER_ARB, statvbo);
+                glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, statibo);
+            }
+            // the array pointers refer to the buffer (lastvertexarray etc. get values no client array can have)
+            if(lastvertexarray != &statvbo)
+            {
+                if(!lastvertexarray) glEnableClientState(GL_VERTEX_ARRAY);
+                glVertexPointer(3, GL_FLOAT, sizeof(vec), (const void *)0);
+                lastvertexarray = &statvbo;
+            }
+            if(lasttexcoordarray != &statibo)
+            {
+                if(!lasttexcoordarray) glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+                glTexCoordPointer(2, GL_FLOAT, sizeof(tcvert), (const void *)(uintptr_t)(numverts*sizeof(vec)));
+                lasttexcoordarray = &statibo;
+            }
+            if(lastcolorarray)
+            {
+                glDisableClientState(GL_COLOR_ARRAY);
+                lastcolorarray = NULL;
+            }
+            glBindBuffer_(GL_ARRAY_BUFFER_ARB, 0);
+            loopi(numdyndraws)
+            {
+                const drawcall &d = dyndraws[i];
+                const void *idx = (const void *)(uintptr_t)(d.start*sizeof(ushort));
+                if(hasDRE) glDrawRangeElements_(d.type, d.minvert, d.maxvert, d.count, GL_UNSIGNED_SHORT, idx);
+                else glDrawElements(d.type, d.count, GL_UNSIGNED_SHORT, idx);
+            }
+            glBindBuffer_(GL_ELEMENT_ARRAY_BUFFER_ARB, 0);
+            xtraverts += dynlen;
+            return true;
         }
 
 #ifdef LINUXBUGISBACK
@@ -474,6 +537,11 @@ struct vertmodel : model
             }
 
             bool isstat = as.frame==0 && as.range==1;
+            if(isstat && !stenciling && mdlvbo && hasVBO && !owner->model->vertexlight)
+            {
+                renderstatbuffers();
+                return;
+            }
             if(isstat && statlist && !stenciling)
             {
                 glCallList(statlist);

@@ -31,6 +31,7 @@ PFNGLGENBUFFERSPROC    glGenBuffers_    = NULL;
 PFNGLDELETEBUFFERSPROC glDeleteBuffers_ = NULL;
 PFNGLBINDBUFFERPROC    glBindBuffer_    = NULL;
 PFNGLBUFFERDATAPROC    glBufferData_    = NULL;
+PFNGLBUFFERSUBDATAPROC glBufferSubData_ = NULL;
 PFNGLMAPBUFFERPROC     glMapBuffer_     = NULL;
 PFNGLUNMAPBUFFERPROC   glUnmapBuffer_   = NULL;
 
@@ -140,10 +141,11 @@ void gl_checkextensions()
         GETBUFPROC(glDeleteBuffers_, PFNGLDELETEBUFFERSPROC, "glDeleteBuffers");
         GETBUFPROC(glBindBuffer_,    PFNGLBINDBUFFERPROC,    "glBindBuffer");
         GETBUFPROC(glBufferData_,    PFNGLBUFFERDATAPROC,    "glBufferData");
+        GETBUFPROC(glBufferSubData_, PFNGLBUFFERSUBDATAPROC, "glBufferSubData");
         GETBUFPROC(glMapBuffer_,     PFNGLMAPBUFFERPROC,     "glMapBuffer");
         GETBUFPROC(glUnmapBuffer_,   PFNGLUNMAPBUFFERPROC,   "glUnmapBuffer");
         #undef GETBUFPROC
-        hasVBO = glGenBuffers_ && glDeleteBuffers_ && glBindBuffer_ && glBufferData_ && glMapBuffer_ && glUnmapBuffer_;
+        hasVBO = glGenBuffers_ && glDeleteBuffers_ && glBindBuffer_ && glBufferData_ && glBufferSubData_ && glMapBuffer_ && glUnmapBuffer_;
         hasPBO = hasVBO && (core21 || hasext(exts, "GL_ARB_pixel_buffer_object") || hasext(exts, "GL_EXT_pixel_buffer_object"));
     }
     if(hasext(exts, "GL_EXT_framebuffer_object"))

@@ -114,6 +114,7 @@ extern PFNGLGENBUFFERSPROC    glGenBuffers_;
 extern PFNGLDELETEBUFFERSPROC glDeleteBuffers_;
 extern PFNGLBINDBUFFERPROC    glBindBuffer_;
 extern PFNGLBUFFERDATAPROC    glBufferData_;
+extern PFNGLBUFFERSUBDATAPROC glBufferSubData_;
 
 // GL_EXT_stencil_two_side
 extern PFNGLACTIVESTENCILFACEEXTPROC glActiveStencilFace_;
