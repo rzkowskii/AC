@@ -448,6 +448,7 @@ tools.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h weapon.h
 tools.o: entity.h world.h command.h varray.h vote.h console.h protos.h
 water.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h weapon.h
 water.o: entity.h world.h command.h varray.h vote.h console.h protos.h
+gfx_sdlgpu.o: gfx_sdlgpu_spirv.h
 weapon.o: cube.h platform.h tools.h geom.h model.h protocol.h sound.h
 weapon.o: weapon.h entity.h world.h command.h varray.h vote.h console.h
 weapon.o: protos.h bot/bot.h bot/bot_util.h bot/bot_waypoint.h bot/ac_bot.h

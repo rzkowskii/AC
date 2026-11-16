@@ -1,5 +1,6 @@
 # Builds AssaultCube on Linux and macOS for every push and pull request:
-# - Linux: CMake and the Makefile (client, server, master), clang and g++
+# - Linux: CMake and the Makefile (client, server, master), clang and g++; the GPU backend's SPIR-V shaders and a
+#   Vulkan run on Mesa lavapipe
 # - Windows: the Visual Studio project (MSBuild), and a MinGW-w64 cross-build on Linux
 # - macOS: CMake against Homebrew, and the universal, self-contained AssaultCube.app (uploaded as an artifact)
 name: build
@@ -45,6 +46,20 @@ jobs:
           cmake --build build
       - name: Smoke test
         run: build/ac_client --home="$RUNNER_TEMP/achome" --version
+      - name: GPU shaders (gpushaders/ compiles to SPIR-V, every variant validates)
+        if: matrix.compiler == 'clang'
+        run: |
+          sudo apt-get install -y --no-install-recommends glslang-tools spirv-tools
+          source/src/gpushaders/build.sh "$RUNNER_TEMP/gfx_sdlgpu_spirv.h"
+      - name: Vulkan smoke test (the GPU backend on Mesa lavapipe under Xvfb loads a map and saves a screenshot)
+        if: matrix.compiler == 'clang'
+        run: |
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers xvfb xauth
+          xvfb-run -a -s "-screen 0 1280x800x24" timeout -k 10 120 build/ac_client --gpu --home="$RUNNER_TEMP/vk" --init -t0 -w1280 -h800 \
+            --loadmap=ac_desert -e"sleep 5000 [screenshottype 0; screenshot] 1; sleep 7000 [quit] 1"
+          grep "renderer: SDL GPU (vulkan)" "$RUNNER_TEMP/vk/clientlog.txt"
+          ! grep -E "SDL GPU: .*(fail|no SPIR-V|no device)" "$RUNNER_TEMP/vk/clientlog.txt"
+          ls "$RUNNER_TEMP"/vk/screenshots/*.bmp
       - name: Makefile build
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then CXX=clang++; else CXX=g++; fi

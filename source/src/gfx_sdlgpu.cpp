@@ -46,8 +46,8 @@ struct gmat
     void mulright(const float *m) { gmat b; memcpy(b.v, m, sizeof(b.v)); gmat a = *this; mul(a, b); } // this = this*m
 };
 
-// --- shaders. Metal compiles MSL source at run time. Vulkan needs SPIR-V: the GLSL 450 equivalents below have to be
-// compiled offline (glslangValidator -V), which isn't set up yet, so the Vulkan path can't run until then.
+// --- shaders. Metal compiles MSL source at run time. Vulkan needs SPIR-V, compiled offline from the GLSL 450 versions in
+// gpushaders/ (see below).
 
 static const char *mslcommon =
     "#include <metal_stdlib>\n"
@@ -83,13 +83,14 @@ static const char *mslcommon =
     "    TCV tc1 [[attribute(3)]];\n"
     "#endif\n"
     "#if LINEAA\n"
-    "    float2 lineaa [[attribute(3)]];\n" // (smooth lines have no second texture unit's coordinates)
+    "    float4 lineaa [[attribute(3)]];\n" // (smooth lines have no second texture unit's coordinates)
     "#endif\n"
     "};\n"
-    // LINEAA: a smooth line drawn as a quad (widelines()): lineaa = this pixel's distance from the line's centre along
-    // the minor axis, and half the line's width, both in pixels
+    // LINEAA: a smooth line drawn as a quad (widelines()), lineaa in pixels: x = distance from the line's centre (along
+    // the minor axis, or perpendicular), y = half the line's width (Apple's GL) or minus the coverage band (Mesa's),
+    // z = position along the line, w = its length (Mesa's)
     "#if LINEAA\n"
-    "#define LINEAAOUT float2 lineaa [[center_no_perspective]];\n"
+    "#define LINEAAOUT float4 lineaa [[center_no_perspective]];\n"
     "#else\n"
     "#define LINEAAOUT\n"
     "#endif\n"
@@ -182,8 +183,10 @@ static const char *mslfragment =
     "                      sampler s0 [[sampler(0)]], sampler s1 [[sampler(1)]])\n"
     "{\n"
     "    float4 c = shade(in, u, tex0, s0, tex1, s1);\n"
-    "#if LINEAA\n" // GL_LINE_SMOOTH: alpha times the pixel row's coverage by the line (before the alpha test, as in GL)
-    "    c.a *= clamp(min(in.lineaa.x + 0.5, in.lineaa.y) - max(in.lineaa.x - 0.5, -in.lineaa.y), 0.0, 1.0);\n"
+    "#if LINEAA\n" // GL_LINE_SMOOTH: alpha times the line's coverage of the pixel (before the alpha test, as in GL)
+    "    float4 l = in.lineaa;\n"
+    "    c.a *= l.y >= 0.0 ? clamp(min(l.x + 0.5, l.y) - max(l.x - 0.5, -l.y), 0.0, 1.0) :\n"
+    "                        clamp(-l.y - abs(l.x), 0.0, 1.0) * clamp(0.5 + min(l.z, l.w - l.z), 0.0, 1.0);\n"
     "#endif\n"
     "    if(u.params.y >= 0.0 && c.a <= u.params.y) discard_fragment();\n"
     "    if(u.fog.z > 0.5) c.rgb = mix(u.fogcolor.rgb, c.rgb, clamp((u.fog.x - in.fogdist) * u.fog.y, 0.0, 1.0));\n"
@@ -237,119 +240,9 @@ static const char *mslpost =
     "    return float4((lB < lmin || lB > lmax) ? rgbA : rgbB, 1.0);\n"
     "}\n";
 
-// The same shaders in GLSL 450 for Vulkan (SDL GPU's SPIR-V resource sets: vertex uniforms in set 1, fragment samplers
-// in set 2, fragment uniforms in set 3). Not compiled yet (no SPIR-V compiler in the build); kept in step with the MSL.
-const char *gpuglslsources[] =
-{
-    "#version 450\n"
-    "#if TEXMAT\n"
-    "#define TCV vec4\n"
-    "#define TCNONE vec4(0.0, 0.0, 0.0, 1.0)\n"
-    "#define TCOUT(m, t) ((m) * (t))\n"
-    "#else\n"
-    "#define TCV vec2\n"
-    "#define TCNONE vec2(0.0)\n"
-    "#define TCOUT(m, t) (t)\n"
-    "#endif\n"
-    "layout(location = 0) in vec3 pos;\n"
-    "#if HAS_TC\n"
-    "layout(location = 1) in TCV tc;\n"
-    "#endif\n"
-    "#if HAS_COLOR\n"
-    "layout(location = 2) in vec4 color;\n"
-    "#endif\n"
-    "#if HAS_TC1\n"
-    "layout(location = 3) in TCV tc1;\n"
-    "#endif\n"
-    "#if LINEAA\n"
-    "layout(location = 3) in vec2 lineaa;\n"
-    "layout(location = 4) noperspective out vec2 olineaa;\n"
-    "#endif\n"
-    "#if TEXMAT\n"
-    "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; mat4 tex0; mat4 tex1; };\n"
-    "#else\n"
-    "layout(set = 1, binding = 0) uniform VSU { mat4 mvp; mat4 mv; vec4 ucolor; };\n"
-    "#endif\n"
-    "layout(location = 0) out TCV otc;\n"
-    "layout(location = 1) out TCV otc1;\n"
-    "layout(location = 2) out vec4 ocolor;\n"
-    "layout(location = 3) out float ofogdist;\n"
-    "void main()\n"
-    "{\n"
-    "    vec4 p = vec4(pos, 1.0);\n"
-    "    gl_Position = mvp * p;\n"
-    "#if HAS_TC\n"
-    "    TCV t0 = tc;\n"
-    "#else\n"
-    "    TCV t0 = TCNONE;\n"
-    "#endif\n"
-    "#if HAS_TC1\n"
-    "    TCV t1 = tc1;\n"
-    "#else\n"
-    "    TCV t1 = t0;\n"
-    "#endif\n"
-    "    otc = TCOUT(tex0, t0);\n"
-    "    otc1 = TCOUT(tex1, t1);\n"
-    "#if HAS_COLOR\n"
-    "    ocolor = color;\n"
-    "#else\n"
-    "    ocolor = ucolor;\n"
-    "#endif\n"
-    "    ofogdist = length((mv * p).xyz);\n"
-    "#if LINEAA\n"
-    "    olineaa = lineaa;\n"
-    "#endif\n"
-    "}\n",
-
-    "#version 450\n"
-    "struct Unit { ivec4 rgb; ivec4 rgbop; ivec4 alpha; ivec4 alphaop; vec4 k; };\n"
-    "#if TEXMAT\n"
-    "layout(location = 0) in vec4 tc;\n"
-    "layout(location = 1) in vec4 tc1;\n"
-    "#define SAMPLE(t, c) textureProj(t, c)\n"
-    "#else\n"
-    "layout(location = 0) in vec2 tc;\n"
-    "layout(location = 1) in vec2 tc1;\n"
-    "#define SAMPLE(t, c) texture(t, c)\n"
-    "#endif\n"
-    "layout(location = 2) in vec4 color;\n"
-    "layout(location = 3) in float fogdist;\n"
-    "#if LINEAA\n"
-    "layout(location = 4) noperspective in vec2 lineaa;\n"
-    "#endif\n"
-    "layout(set = 2, binding = 0) uniform sampler2D tex0;\n"
-    "layout(set = 2, binding = 1) uniform sampler2D tex1;\n"
-    "layout(set = 3, binding = 0) uniform FSU { vec4 fogcolor; vec4 fog; vec4 params; ivec4 units; Unit unit[2]; };\n"
-    "layout(location = 0) out vec4 ocolor;\n"
-    "vec4 source(int s, vec4 t, vec4 p, vec4 k, vec4 c) { return s == 0 ? t : (s == 1 ? p : (s == 2 ? k : c)); }\n"
-    "vec3 argrgb(int s, int op, vec4 t, vec4 p, vec4 k, vec4 c) { vec4 v = source(s, t, p, k, c); return op == 0 ? v.rgb : (op == 1 ? 1.0 - v.rgb : (op == 2 ? vec3(v.a) : vec3(1.0 - v.a))); }\n"
-    "float arga(int s, int op, vec4 t, vec4 p, vec4 k, vec4 c) { vec4 v = source(s, t, p, k, c); return op == 3 ? 1.0 - v.a : v.a; }\n"
-    "vec3 combine3(int f, vec3 a, vec3 b, vec3 c) { return f == 1 ? a : (f == 3 ? a + b : (f == 4 ? a + b - 0.5 : (f == 5 ? a*c + b*(1.0 - c) : (f == 6 ? a - b : (f == 7 ? vec3(4.0*dot(a - 0.5, b - 0.5)) : a*b))))); }\n"
-    "float combine1(int f, float a, float b, float c) { return f == 1 ? a : (f == 3 ? a + b : (f == 4 ? a + b - 0.5 : (f == 5 ? a*c + b*(1.0 - c) : (f == 6 ? a - b : a*b)))); }\n"
-    "vec4 texunit(Unit u, vec4 t, vec4 p, vec4 c)\n"
-    "{\n"
-    "    vec3 rgb = combine3(u.rgb.x, argrgb(u.rgb.y, u.rgbop.x, t, p, u.k, c), argrgb(u.rgb.z, u.rgbop.y, t, p, u.k, c), argrgb(u.rgb.w, u.rgbop.z, t, p, u.k, c)) * float(u.rgbop.w);\n"
-    "    float a = combine1(u.alpha.x, arga(u.alpha.y, u.alphaop.x, t, p, u.k, c), arga(u.alpha.z, u.alphaop.y, t, p, u.k, c), arga(u.alpha.w, u.alphaop.z, t, p, u.k, c)) * float(u.alphaop.w);\n"
-    "    return clamp(vec4(rgb, a), 0.0, 1.0);\n"
-    "}\n"
-    "void main()\n"
-    "{\n"
-    "    vec4 c = color;\n"
-    "    if(units.x != 0) c = texunit(unit[0], SAMPLE(tex0, tc), c, color);\n"
-    "    if(units.y != 0) c = texunit(unit[1], SAMPLE(tex1, tc1), c, color);\n"
-    "#if PICK\n"
-    "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
-    "    ocolor = vec4(gl_FragCoord.z);\n"
-    "#else\n"
-    "#if LINEAA\n"
-    "    c.a *= clamp(min(lineaa.x + 0.5, lineaa.y) - max(lineaa.x - 0.5, -lineaa.y), 0.0, 1.0);\n"
-    "#endif\n"
-    "    if(params.y >= 0.0 && c.a <= params.y) discard;\n"
-    "    if(fog.z > 0.5) c.rgb = mix(fogcolor.rgb, c.rgb, clamp((fog.x - fogdist) * fog.y, 0.0, 1.0));\n"
-    "    ocolor = c;\n"
-    "#endif\n"
-    "}\n",
-};
+// Vulkan takes SPIR-V: the same shaders in GLSL 450 are in gpushaders/ (kept in step with the MSL above), compiled for
+// every variant by gpushaders/build.sh into gfx_sdlgpu_spirv.h, which is committed.
+#include "gfx_sdlgpu_spirv.h"
 
 struct vsuniforms { float mvp[16], mv[16], color[4], tex0[16], tex1[16]; };
 struct gpuunit { int rgb[4], rgbop[4], alpha[4], alphaop[4]; float k[4]; };
@@ -468,6 +361,10 @@ struct sdlgpubackend : gfxdevice
     GLenum stencilface;         // GL_EXT_stencil_two_side's active face
     GLenum polymode;            // glPolygonMode: GL_FILL, or GL_LINE (polygons drawn as their edges: the editor's cursor)
     float linewidthv;           // glLineWidth: lines this wide (rounded) or wider are drawn as quads (widelines())
+    // Which GL the image should match where GL leaves the details to the implementation: Apple's (Metal) or Mesa's
+    // (Vulkan: Linux). They split a GL_QUADS quad along different diagonals (1-3 and 0-2), which shows in the
+    // interpolated lighting, and draw smooth lines differently (minor-axis band vs perpendicular rectangle; widelines())
+    bool mesastyle;
     int stencilbitsv;           // 8 if the depth target has a stencil buffer (stencilbits, for stencil shadows)
     int viewportv[4];
     int activetex, clientunit;
@@ -479,7 +376,7 @@ struct sdlgpubackend : gfxdevice
     struct immvert { float pos[3], tc[2], color[4]; };
     vector<immvert> immverts;
     // lines drawn as quads (widelines()): the vertices plus, for smooth lines, the distance from the line's centre
-    struct quadvert { float pos[3], tc[2], color[4], aa[2]; };
+    struct quadvert { float pos[3], tc[2], color[4], aa[4]; };
     vector<quadvert> quadverts;
     GLenum immmode;
     float immtc[2];
@@ -541,6 +438,7 @@ struct sdlgpubackend : gfxdevice
     {
         framecount = 0;
         midframe = false;
+        mesastyle = false;
         widedraw = 0;
         widesmooth = false;
         lastuploadsize = smallframes = 0;
@@ -603,14 +501,9 @@ struct sdlgpubackend : gfxdevice
         window = w;
         dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, false, NULL);
         if(!dev) { conoutf("\f3SDL GPU: no device (%s)", SDL_GetError()); return false; }
-        format = SDL_GetGPUShaderFormats(dev);
-        if(!(format & SDL_GPU_SHADERFORMAT_MSL))
-        {
-            conoutf("\f3SDL GPU: the %s driver needs SPIR-V shaders, which this build doesn't have yet", SDL_GetGPUDeviceDriver(dev));
-            SDL_DestroyGPUDevice(dev);
-            dev = NULL;
-            return false;
-        }
+        // MSL source (Metal) where the driver takes it, otherwise the precompiled SPIR-V (Vulkan)
+        format = SDL_GetGPUShaderFormats(dev) & SDL_GPU_SHADERFORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV;
+        mesastyle = format != SDL_GPU_SHADERFORMAT_MSL;
         if(!SDL_ClaimWindowForGPUDevice(dev, window))
         {
             conoutf("\f3SDL GPU: can't use the window (%s)", SDL_GetError());
@@ -729,6 +622,8 @@ struct sdlgpubackend : gfxdevice
 
     SDL_GPUShader *makepostshader(const char *entry, SDL_GPUShaderStage stage, int samplers, int uniforms)
     {
+        if(format == SDL_GPU_SHADERFORMAT_SPIRV)
+            return makespirvshader(!strcmp(entry, "vpost") ? "post.vert" : (!strcmp(entry, "fgamma") ? "gamma.frag" : "fxaa.frag"), 0, stage, samplers, uniforms);
         SDL_GPUShaderCreateInfo si;
         memset(&si, 0, sizeof(si));
         si.code = (const Uint8 *)mslpost;
@@ -852,8 +747,36 @@ struct sdlgpubackend : gfxdevice
 
     // --- shaders and pipelines
 
+    // a precompiled SPIR-V module (gfx_sdlgpu_spirv.h)
+    SDL_GPUShader *makespirvshader(const char *name, int variant, SDL_GPUShaderStage stage, int samplers, int uniforms)
+    {
+        const gpuspirv *m = NULL;
+        loopi(int(sizeof(gpuspirvshaders)/sizeof(gpuspirvshaders[0])))
+            if(gpuspirvshaders[i].variant == variant && !strcmp(gpuspirvshaders[i].name, name)) { m = &gpuspirvshaders[i]; break; }
+        if(!m) { conoutf("\f3SDL GPU: no SPIR-V for %s, variant %d", name, variant); return NULL; }
+        SDL_GPUShaderCreateInfo si;
+        memset(&si, 0, sizeof(si));
+        si.code = (const Uint8 *)m->code;
+        si.code_size = m->size;
+        si.entrypoint = "main";
+        si.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        si.stage = stage;
+        si.num_samplers = samplers;
+        si.num_uniform_buffers = uniforms;
+        SDL_GPUShader *s = SDL_CreateGPUShader(dev, &si);
+        if(!s) conoutf("\f3SDL GPU: SPIR-V shader %s (variant %d) failed: %s", name, variant, SDL_GetError());
+        return s;
+    }
+
+    // variant: 1, 2, 4 = texture coordinates, colours, unit 1's coordinates in the vertices; 8 = texture matrices;
+    // 16 = smooth line (the fragment shaders only use 8 and 16)
     SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, int variant, int samplers, int uniforms)
     {
+        if(format == SDL_GPU_SHADERFORMAT_SPIRV)
+        {
+            if(stage == SDL_GPU_SHADERSTAGE_VERTEX) return makespirvshader("scene.vert", variant & 31, stage, samplers, uniforms);
+            return makespirvshader(body == mslpick ? "pick.frag" : "scene.frag", (variant&8 ? 1 : 0) | (variant&16 ? 2 : 0), stage, samplers, uniforms);
+        }
         defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n#define TEXMAT %d\n#define LINEAA %d\n",
             variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0, variant&8 ? 1 : 0, variant&16 ? 1 : 0);
         vector<char> src;
@@ -1589,7 +1512,7 @@ struct sdlgpubackend : gfxdevice
             d.vbsrc[ATTR_COLOR] = SRC_ARENA; d.vboffset[ATTR_COLOR] = off + offsetof(immvert, color);
             if(widedraw && widesmooth)
             {
-                k.attrs[ATTR_TC1] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2; k.pitch[ATTR_TC1] = stride;
+                k.attrs[ATTR_TC1] = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4; k.pitch[ATTR_TC1] = stride;
                 d.vbsrc[ATTR_TC1] = SRC_ARENA; d.vboffset[ATTR_TC1] = off + offsetof(quadvert, aa);
                 k.lineaa = 1;
             }
@@ -1774,11 +1697,19 @@ struct sdlgpubackend : gfxdevice
             case GL_TRIANGLE_FAN: case GL_POLYGON:
                 for(int i = 1; i + 1 < count; i++) { indexarena.add(o); indexarena.add(o+i); indexarena.add(o+i+1); }
                 break;
-            case GL_QUADS:
+            case GL_QUADS: // along the diagonal the platform's GL uses (see mesastyle)
                 for(int i = 0; i + 3 < count; i += 4)
                 {
-                    indexarena.add(o+i); indexarena.add(o+i+1); indexarena.add(o+i+3);
-                    indexarena.add(o+i+1); indexarena.add(o+i+2); indexarena.add(o+i+3);
+                    if(mesastyle)
+                    {
+                        indexarena.add(o+i); indexarena.add(o+i+1); indexarena.add(o+i+2);
+                        indexarena.add(o+i); indexarena.add(o+i+2); indexarena.add(o+i+3);
+                    }
+                    else
+                    {
+                        indexarena.add(o+i); indexarena.add(o+i+1); indexarena.add(o+i+3);
+                        indexarena.add(o+i+1); indexarena.add(o+i+2); indexarena.add(o+i+3);
+                    }
                 }
                 break;
             case GL_LINE_STRIP:
@@ -1883,12 +1814,14 @@ struct sdlgpubackend : gfxdevice
         immverts.setsize(0);
     }
 
-    // Lines as GL draws them where Metal and Vulkan can't (Apple's GL, measured with a test program):
-    // - smooth lines (GL_LINE_SMOOTH, which the game always enables): fragments wherever a band (max(w, 1) + 1) / 2
-    //   pixels either side of the line along its minor axis covers a pixel centre (or sample), with alpha times the
-    //   pixel row's overlap with [-w/2, w/2] - so with blending off, a 1-pixel line colours two rows;
-    // - aliased lines 2 pixels or wider: a band of round(w) pixels along the minor axis.
-    // Each segment of the index list from start becomes a quad (a parallelogram: the band, not extended past the ends).
+    // Lines as GL draws them where Metal and Vulkan can't; both rules below were measured with test programs.
+    // Smooth lines (GL_LINE_SMOOTH, which the game always enables), with W = max(w, 1):
+    // - Apple's GL: fragments wherever a band (W + 1)/2 pixels either side of the line along its minor axis covers a
+    //   pixel centre (or sample), with alpha times the pixel row's overlap with [-w/2, w/2]; ends not extended;
+    // - Mesa's GL: a rectangle (W + 1)/2 pixels either side, perpendicular to the line and half a pixel longer at each
+    //   end, alpha times clamp((W + 1)/2 - distance, 0, 1), and at the ends times clamp(0.5 + distance inside, 0, 1).
+    // Either way, with blending off a 1-pixel line colours two rows. Aliased lines 2 pixels or wider: a band of round(w)
+    // pixels along the minor axis. Each segment of the index list from start becomes a quad.
     // The corners are computed in eye space, so depth, fog and clipping work as for the line itself; segments are
     // clipped to the near plane first. (Immediate mode only: the game draws all its lines that way.)
     void widelines(uint start, bool edges)
@@ -1897,7 +1830,7 @@ struct sdlgpubackend : gfxdevice
         glmatrixf p, pinv;
         memcpy(p.v, proj.v, sizeof(p.v));
         if(!pinv.invert(p)) { indexarena.setsize(start); return; }
-        bool smooth = caps[capindex(GL_LINE_SMOOTH)];
+        bool smooth = caps[capindex(GL_LINE_SMOOTH)], perpendicular = smooth && mesastyle;
         float w = clamp(linewidthv, 0.0f, 16.0f), band = smooth ? (max(w, 1.0f) + 1) * 0.5f : int(w + 0.5f) * 0.5f, cover = w * 0.5f,
               sx = max(viewportv[2], 1) * 0.5f, sy = max(viewportv[3], 1) * 0.5f;
         quadverts.setsize(0);
@@ -1927,18 +1860,25 @@ struct sdlgpubackend : gfxdevice
             float dx = (c[1].x/c[1].w - c[0].x/c[0].w) * sx, dy = (c[1].y/c[1].w - c[0].y/c[0].w) * sy;
             if(dx == 0 && dy == 0) continue; // (GL draws nothing for a zero-length line)
             bool xmajor = fabs(dx) >= fabs(dy);
+            float len = sqrtf(dx*dx + dy*dy), ux = dx/len, uy = dy/len,
+                  // the band's direction (pixels) and, Mesa's, how far past each end
+                  bx = perpendicular ? -uy : (xmajor ? 0 : 1), by = perpendicular ? ux : (xmajor ? 1 : 0), ext = perpendicular ? 0.5f : 0;
             loopj(2)
             {
-                // the band's half-height in pixels, as an eye-space offset at this end's depth
-                vec4 o(xmajor ? 0 : band / sx * c[j].w, xmajor ? band / sy * c[j].w : 0, 0, 0), d;
-                loopk(4) d[k] = pinv.v[k]*o.x + pinv.v[4+k]*o.y;
+                // in pixels from the end, as eye-space offsets at this end's depth: across the band, and past the end
+                float along = j ? ext : -ext;
+                vec4 ob(bx*band / sx * c[j].w, by*band / sy * c[j].w, 0, 0), oa(ux*along / sx * c[j].w, uy*along / sy * c[j].w, 0, 0), db, da;
+                loopk(4) { db[k] = pinv.v[k]*ob.x + pinv.v[4+k]*ob.y; da[k] = pinv.v[k]*oa.x + pinv.v[4+k]*oa.y; }
                 loopk(2)
                 {
                     quadvert &q = quadverts.add();
                     memcpy(q.pos, v[j].pos, sizeof(immvert));
-                    float sgn = k ? -1 : 1, ew = e[j].w + sgn*d.w;
-                    loopl(3) q.pos[l] = (e[j][l] + sgn*d[l]) / ew;
-                    q.aa[0] = sgn*band; q.aa[1] = cover;
+                    float sgn = k ? -1 : 1, ew = e[j].w + sgn*db.w + da.w;
+                    loopl(3) q.pos[l] = (e[j][l] + sgn*db[l] + da[l]) / ew;
+                    q.aa[0] = sgn*band;
+                    q.aa[1] = perpendicular ? -band : cover;
+                    q.aa[2] = j ? len + ext : -ext;
+                    q.aa[3] = len;
                 }
             }
         }
