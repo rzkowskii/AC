@@ -1,0 +1,231 @@
+# Builds the AssaultCube release packages:
+# - macOS: the universal (Apple Silicon + Intel) AssaultCube.app in a disk image (source/macos/make-app.sh --dmg)
+# - Linux: AppImages for x86_64 and aarch64 (source/linux/make-appimage.sh)
+#
+# Pushing a tag v* (e.g. v1.4.0.0) attaches all packages and their SHA-256 checksums to a draft GitHub release for that
+# tag, which a maintainer reviews and publishes. Running the workflow by hand (Actions > release > Run workflow) only
+# uploads the packages as workflow artifacts.
+#
+# Tag builds are PRODUCTION builds (source/src/cube.h: the release version number and the official master server), as
+# source/dev_tools/packaging_guide.txt requires. Manual runs build a development version unless "production" is checked.
+#
+# macOS code signing and notarization use these repository secrets (Settings > Secrets and variables > Actions):
+#   MACOS_CERTIFICATE_P12       the "Developer ID Application" certificate with its private key, exported from Keychain
+#                               Access as .p12, base64-encoded (base64 -i cert.p12 | pbcopy)
+#   MACOS_CERTIFICATE_PASSWORD  the password of that .p12 file
+#   MACOS_SIGNING_IDENTITY      optional: the identity to sign with, e.g. "Developer ID Application: Name (TEAMID)"
+#                               (default: the Developer ID Application identity in the .p12)
+#   MACOS_NOTARY_KEY            an App Store Connect API key for notarization (the .p8 file's contents; App Store Connect
+#                               > Users and Access > Integrations, "Developer" access is enough)
+#   MACOS_NOTARY_KEY_ID         its key ID
+#   MACOS_NOTARY_ISSUER_ID      its issuer ID
+# With the certificate, the app is signed with the Developer ID, the hardened runtime and a secure timestamp; with the
+# three MACOS_NOTARY_* secrets too, the disk image is notarized (xcrun notarytool submit --wait) and the ticket stapled
+# to it. Without them the app is signed ad-hoc, as in local builds, and Gatekeeper asks users to allow it (see
+# source/macos/README.md). The secrets are only given to the steps that use them.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      production:
+        description: PRODUCTION build (release version number, official master server)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: macos-14
+    outputs:
+      signing: ${{ steps.notarize.outputs.signing }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Production build
+        if: github.event_name == 'push' || inputs.production
+        run: |
+          sed -i.orig 's|^//#define PRODUCTION$|#define PRODUCTION|' source/src/cube.h
+          rm source/src/cube.h.orig
+          grep -qx '#define PRODUCTION' source/src/cube.h
+      - name: Signing certificate (Developer ID, if the secrets are set)
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12" ]; then
+            echo "No MACOS_CERTIFICATE_P12 secret: the app will be signed ad-hoc"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychainpass="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychainpass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychainpass" "$keychain"
+          printf '%s' "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -f pkcs12 \
+            -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychainpass" "$keychain" > /dev/null
+          # shellcheck disable=SC2046 # (the keychain search list: the new keychain, then the existing ones)
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          identity="$MACOS_SIGNING_IDENTITY"
+          if [ -z "$identity" ]; then # the SHA-1 hash of the certificate's Developer ID Application identity
+            identity="$(security find-identity -v -p codesigning "$keychain" | awk '/"Developer ID Application: / {print $2; exit}')"
+          fi
+          if [ -z "$identity" ]; then
+            echo "::error::MACOS_CERTIFICATE_P12 contains no Developer ID Application identity"
+            security find-identity -v -p codesigning "$keychain"
+            exit 1
+          fi
+          echo "CODESIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+      - name: Universal app bundle and disk image
+        run: source/macos/make-app.sh --dmg
+      - name: Notarize and staple (if signed with a Developer ID and the notarization secrets are set)
+        id: notarize
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          dmg="$(ls source/macos/build/AssaultCube-*-macOS.dmg)"
+          if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+            echo "signing=ad-hoc signed (not notarized)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$MACOS_NOTARY_KEY" ] || [ -z "$MACOS_NOTARY_KEY_ID" ] || [ -z "$MACOS_NOTARY_ISSUER_ID" ]; then
+            echo "::warning::Signed with a Developer ID, but not notarized: the MACOS_NOTARY_* secrets are missing"
+            echo "signing=Developer ID signed (not notarized)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/notary-key.p8"
+          printf '%s\n' "$MACOS_NOTARY_KEY" > "$key"
+          xcrun notarytool submit "$dmg" --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID" \
+            --wait --timeout 1h --output-format json | tee "$RUNNER_TEMP/notary.json"
+          status="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/notary.json")"
+          if [ "$status" != Accepted ]; then
+            id="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["id"])' "$RUNNER_TEMP/notary.json")"
+            xcrun notarytool log "$id" --key "$key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID"
+            rm -f "$key"
+            echo "::error::Notarization failed: $status"
+            exit 1
+          fi
+          rm -f "$key"
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          # what Gatekeeper will say about the disk image, and about the app on it
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
+          mnt="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" > /dev/null
+          spctl --assess --type execute --verbose=2 "$mnt/AssaultCube.app"
+          hdiutil detach "$mnt" > /dev/null
+          echo "signing=Developer ID signed and notarized" >> "$GITHUB_OUTPUT"
+      - name: Remove the signing keychain
+        if: always() && env.SIGNING_KEYCHAIN != ''
+        run: security delete-keychain "$SIGNING_KEYCHAIN"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AssaultCube-macOS
+          path: source/macos/build/AssaultCube-*-macOS.dmg
+          if-no-files-found: error
+
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Production build
+        if: github.event_name == 'push' || inputs.production
+        run: |
+          sed -i.orig 's|^//#define PRODUCTION$|#define PRODUCTION|' source/src/cube.h
+          rm source/src/cube.h.orig
+          grep -qx '#define PRODUCTION' source/src/cube.h
+      - name: Install dependencies (build tools and headers, see source/linux/build-deps.sh; Xvfb and Mesa for the test)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential clang cmake ninja-build pkg-config curl \
+            ca-certificates rsync zip file \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl-dev libgl-dev libdrm-dev libgbm-dev \
+            libdbus-1-dev libudev-dev libibus-1.0-dev libpipewire-0.3-dev libpulse-dev libasound2-dev zlib1g-dev \
+            xvfb xauth libgl1-mesa-dri mesa-vulkan-drivers
+      - name: AppImage
+        run: source/linux/make-appimage.sh
+      - name: Test (version; OpenGL on Mesa llvmpipe and Vulkan on lavapipe under Xvfb load a map and save a screenshot)
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1 # no FUSE needed
+          PRODUCTION: ${{ github.event_name == 'push' || inputs.production }}
+        run: |
+          appimage="$(ls source/linux/build/AssaultCube-*-${{ matrix.arch }}.AppImage)"
+          version="$("$appimage" --home="$RUNNER_TEMP/version" --version | grep -E '^-?[0-9]+\.[0-9]+$')"
+          echo "$appimage: version $version, production build: $PRODUCTION"
+          case "$PRODUCTION,$version" in true,-*|false,[0-9]*) echo "::error::unexpected version $version"; exit 1 ;; esac
+          for renderer in gl gpu; do
+            xvfb-run -a -s "-screen 0 1280x800x24" timeout 180 "$appimage" --$renderer --home="$RUNNER_TEMP/$renderer" \
+              --init -t0 -w1280 -h800 --loadmap=ac_desert -e"sleep 5000 [screenshottype 0; screenshot] 1; sleep 7000 [quit] 1"
+            ls "$RUNNER_TEMP/$renderer"/screenshots/*.bmp
+          done
+          grep "Renderer: llvmpipe" "$RUNNER_TEMP/gl/clientlog.txt"
+          grep "renderer: SDL GPU (vulkan)" "$RUNNER_TEMP/gpu/clientlog.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AssaultCube-Linux-${{ matrix.arch }}
+          path: source/linux/build/AssaultCube-*-${{ matrix.arch }}.AppImage
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          MACOS_SIGNING: ${{ needs.macos.outputs.signing }}
+        run: |
+          cd dist
+          ls -l
+          compgen -G "AssaultCube-${TAG#v}-*" > /dev/null \
+            || echo "::warning::the package names don't contain the tag's version ${TAG#v} (AC_VERSION in source/src/cube.h)"
+          sha256sum AssaultCube-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          dmg="$(echo AssaultCube-*-macOS.dmg)"
+          appimages=""
+          for f in AssaultCube-*.AppImage; do appimages="${appimages:+$appimages, }\`$f\`"; done
+          {
+            echo "- **macOS 11 or later** (Apple Silicon and Intel): \`$dmg\`, $MACOS_SIGNING."
+            echo "- **Linux** (x86_64 and aarch64; glibc 2.38 or later: Ubuntu 24.04, Debian 13, Fedora 39 and newer): $appimages."
+            echo "  Make it executable and run it; \`server\` as the first argument starts the standalone server (see \`source/linux/README.md\`)."
+            echo "- \`SHA256SUMS.txt\`: SHA-256 checksums of the packages."
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" AssaultCube-* SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" --draft --verify-tag --title "AssaultCube ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md" \
+              AssaultCube-* SHA256SUMS.txt
+          fi
