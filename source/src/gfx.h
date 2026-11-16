@@ -2,9 +2,9 @@
 //
 // - gfx_gl.cpp: OpenGL, the original renderer. Each call is the GL call the game used to make, so the GL path's
 //   images and performance stay what they were.
-// - gfx_sdlgpu.cpp: SDL3's GPU API (Metal on macOS, Vulkan on Linux), selected with --gpu. It implements the same
-//   fixed-function semantics with shaders and cached pipelines, and records each frame so it can upload everything
-//   first and draw each target in a single render pass.
+// - gfx_sdlgpu.cpp: SDL3's GPU API (Metal on macOS, Vulkan on Linux): the default on macOS, otherwise "renderer 1" or
+//   --gpu (main.cpp). It implements the same fixed-function semantics with shaders and cached pipelines, and records
+//   each frame so it can upload everything first and draw each target in a single render pass.
 //
 // The vocabulary is the fixed-function GL the game is written in (GL enums for primitives, state and formats), so call
 // sites port one to one. The few things that only exist with GL (display lists, shaders.cpp's GLSL programs,
@@ -145,6 +145,7 @@ struct gfxdevice
 extern gfxdevice *gfx;
 extern gfxdevice *gfx_opengl();
 extern gfxdevice *gfx_sdlgpu();
+extern void gfx_sdlgpu_destroy();                            // releases the GPU backend and its device (resetgl)
 
 // true while the GL backend is active: the GL-only parts of the renderer that call OpenGL directly run only then
 static inline bool gfx_legacygl() { return gfx->api() == GFX_OPENGL; }

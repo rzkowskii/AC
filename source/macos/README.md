@@ -33,6 +33,15 @@ AssaultCube.app/Contents/
   Info.plist            macOS 11+, games category (Game Mode on macOS 14+), Retina capable
 ```
 
+## Renderer: Metal
+
+The game renders with **Metal**, through SDL3's GPU API (`source/src/gfx_sdlgpu.cpp`); OpenGL stays available. To switch:
+
+- *Settings → Video → Renderer* (Default, OpenGL, Metal/Vulkan), or the `renderer` variable (-1 default, 0 OpenGL, 1 Metal). It takes effect at the next start.
+- `--gl` or `--gpu` on the command line, for one run.
+
+If Metal can't start, the game uses OpenGL. If a start with Metal never gets going (a crash or a hang at startup), the next start uses OpenGL and says so in the console; `renderer 1` tries Metal again.
+
 ## 3D audio (HRTF)
 
 The app uses OpenAL Soft instead of Apple's deprecated OpenAL.framework. That's the same audio engine AssaultCube uses on Linux and Windows. It adds **HRTF**, binaural rendering for headphones: sounds can be heard in front, behind, above and below you, not just left and right. Choose it in *Settings → Sound → 3D audio for headphones (HRTF)*, or use the `hrtf` variable:

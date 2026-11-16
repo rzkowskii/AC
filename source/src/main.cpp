@@ -33,6 +33,8 @@ void cleanup(char *msg)         // single program exit point;
 
 VAR(resetcfg, 0, 0, 1);
 
+static void cleargpulock();
+
 void quit()                     // normal exit
 {
     if(clientlogfile) clientlogfile->fflush();
@@ -42,6 +44,7 @@ void quit()                     // normal exit
     resetcontext();
     alias("onQuit", "");
     alias("mapstartonce", "");
+    cleargpulock();
     extern void writeinitcfg();
     writeinitcfg();
     writeservercfg();
@@ -109,7 +112,17 @@ VARF(fsaa, -1, -1, 16, initwarning("anti-aliasing"));
 VARF(vsync, -1, -1, 1, initwarning("vertical sync"));
 VARF(highdpi, 0, 1, 1, initwarning("high-DPI rendering")); // render at native pixel resolution on Retina/HiDPI displays instead of being upscaled
 
-bool usegpu = false; // --gpu: SDL GPU renderer (gfx_sdlgpu.cpp)
+// The renderer: 0 = OpenGL, 1 = the SDL GPU backend (gfx_sdlgpu.cpp: Metal on macOS, Vulkan on Linux), -1 = the
+// platform's default: the GPU backend on macOS, OpenGL elsewhere (Vulkan on Linux is opt-in until it has been tested on
+// real GPUs). Saved in init.cfg; --gl and --gpu override it for one run. A change takes effect at the next start.
+VARF(renderer, -1, -1, 1, initwarning("renderer", INIT_RESET, CHANGE_RESTART));
+static int forcerenderer = -1; // --gl: 0, --gpu: 1
+bool usegpu = false;           // this run uses the GPU backend (if it starts: otherwise OpenGL)
+// A start with the GPU backend that never got going (a crash, or a hang the player had to end) makes the next start use
+// OpenGL, so a Mac where Metal fails doesn't lock players out of the menu: config/gpustart.lock is written before the
+// GPU backend starts and removed after 300 frames or at a normal exit. (Not with --gpu, which asks for it explicitly.)
+static string gpulockfile = "";
+static void cleargpulock() { if(gpulockfile[0]) { delfile(gpulockfile); gpulockfile[0] = '\0'; } }
 static int windoww = 0, windowh = 0; // window size in screen coordinates (points); screenw/screenh are the drawable size in pixels
 
 VAR(desktopw, 1, 0, 0); // resolution of desktop (assumed to be maximum resolution)
@@ -250,6 +263,7 @@ void writeinitcfg()
     f->printf("fsaa %d\n", fsaa);
     f->printf("vsync %d\n", vsync);
     f->printf("highdpi %d\n", highdpi);
+    f->printf("renderer %d\n", renderer);
     extern int audio, soundchannels, igraphdefaultframetime;
     f->printf("audio %d\n", audio > 0 ? 1 : 0);
     f->printf("soundchannels %d\n", soundchannels);
@@ -730,6 +744,11 @@ COMMAND(getdisplayresolutions, "");
 
 void setupscreen(int &useddepthbits, int &usedfsaa)
 {
+    if(gfx != gfx_opengl()) // resetgl: the GPU backend starts over with the new window, as GL does with a new context
+    {
+        gfx = gfx_opengl();
+        gfx_sdlgpu_destroy();
+    }
     if(glcontext)
     {
         SDL_GL_DestroyContext(glcontext);
@@ -1783,7 +1802,8 @@ int main(int argc, char **argv)
                     {
                         initmode = atoi(&argv[i][11]);
                     }
-                    else if(!strcmp(argv[i], "--gpu")) usegpu = true; // SDL GPU renderer (Metal/Vulkan), work in progress
+                    else if(!strcmp(argv[i], "--gpu")) forcerenderer = 1; // the SDL GPU renderer (Metal, Vulkan) for this run
+                    else if(!strcmp(argv[i], "--gl")) forcerenderer = 0;  // OpenGL for this run
                     else if(!strncmp(argv[i], "--loaddemo=", 11))
                     {
                         initdemo = &argv[i][11];
@@ -1849,6 +1869,30 @@ int main(int argc, char **argv)
     if(SDL_GetCurrentVideoDriver()) conoutf("video driver: %s", SDL_GetCurrentVideoDriver()); // e.g. x11, wayland, cocoa
 
     initlog("video: mode");
+    int wantrenderer = forcerenderer >= 0 ? forcerenderer : renderer;
+#ifdef __APPLE__
+    usegpu = wantrenderer != 0;
+#else
+    usegpu = wantrenderer == 1;
+#endif
+    if(usegpu && forcerenderer < 0)
+    {
+        string lock;
+        copystring(lock, findfile(path("config/gpustart.lock", true), "w"));
+        if(fileexists(lock, "r"))
+        {
+            conoutf("\f3the Metal/Vulkan renderer didn't get going last time: using OpenGL (\"renderer 1\" or the video menu to try it again)");
+            usegpu = false;
+            renderer = 0; // (saved)
+            delfile(lock);
+        }
+        else if(FILE *f = fopen(lock, "w")) // (quietly: the game's own file writes are logged to the console)
+        {
+            fputs("the GPU renderer is starting\n", f);
+            fclose(f);
+            copystring(gpulockfile, lock);
+        }
+    }
     int useddepthbits = 0, usedfsaa = 0;
     setupscreen(useddepthbits, usedfsaa);
 
@@ -2068,6 +2112,7 @@ int main(int argc, char **argv)
         {
             gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
             if(frames>4) gfx->present();
+            if(frames>300 && gpulockfile[0]) cleargpulock(); // the GPU backend got going
             // "gpusync 1": wait for the GPU to finish the frame, so the driver can't queue frames ahead. Costs throughput
             // (CPU and GPU no longer overlap) but keeps input-to-display latency at one frame.
             extern int gpusync;

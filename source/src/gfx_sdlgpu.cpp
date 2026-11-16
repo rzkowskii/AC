@@ -1,5 +1,5 @@
-// gfx_sdlgpu.cpp: the SDL3 GPU backend of the renderer interface (gfx.h): Metal on macOS, Vulkan on Linux. Selected
-// with --gpu.
+// gfx_sdlgpu.cpp: the SDL3 GPU backend of the renderer interface (gfx.h): Metal on macOS, Vulkan on Linux. The default
+// renderer on macOS; elsewhere "renderer 1" or --gpu (main.cpp).
 //
 // It implements the fixed-function GL state the game draws with: the matrix stacks are kept on the CPU, the state that
 // a GPU pipeline fixes (blending, depth test, culling, colour mask, vertex layout, primitive type) selects a cached
@@ -489,6 +489,39 @@ struct sdlgpubackend : gfxdevice
         activetex = clientunit = 0;
         loopi(4) boundtex[i] = 0;
         loopi(NUMATTRS) { memset(&arrays[i], 0, sizeof(gpuarray)); }
+    }
+
+    // releases everything and the device: resetgl (new video settings) recreates the window and starts a new backend, as
+    // GL starts a new context. The game has deleted its own textures and buffers by then; the rest goes here.
+    void shutdown()
+    {
+        if(!dev) return;
+        recording = false; // (a frame being recorded is dropped)
+        SDL_WaitForGPUIdle(dev);
+        if(pickfence) SDL_ReleaseGPUFence(dev, pickfence);
+        pickfence = NULL;
+        loopv(textures) if(textures[i].tex) SDL_ReleaseGPUTexture(dev, textures[i].tex);
+        loopv(buffers) if(buffers[i].buf) SDL_ReleaseGPUBuffer(dev, buffers[i].buf);
+        loopv(samplers) if(samplers[i]) SDL_ReleaseGPUSampler(dev, samplers[i]);
+        loopv(pipelines) if(pipelines[i]) SDL_ReleaseGPUGraphicsPipeline(dev, pipelines[i]);
+        loopi(32) if(vshaders[i]) SDL_ReleaseGPUShader(dev, vshaders[i]);
+        loopi(4) { if(fshaders[i]) SDL_ReleaseGPUShader(dev, fshaders[i]); if(pickshaders[i]) SDL_ReleaseGPUShader(dev, pickshaders[i]); }
+        SDL_GPUShader *shaders[] = { postvs, gammafs, fxaafs };
+        loopi(3) if(shaders[i]) SDL_ReleaseGPUShader(dev, shaders[i]);
+        if(fxaapipe) SDL_ReleaseGPUGraphicsPipeline(dev, fxaapipe);
+        if(gammapipe) SDL_ReleaseGPUGraphicsPipeline(dev, gammapipe);
+        if(postsampler) SDL_ReleaseGPUSampler(dev, postsampler);
+        SDL_GPUTexture *targets[] = { emptytex, colortex, msaatex, depthtex, pickcolor, pickdepth, posttex, postdepth };
+        loopi(8) if(targets[i]) SDL_ReleaseGPUTexture(dev, targets[i]);
+        if(arenavb) SDL_ReleaseGPUBuffer(dev, arenavb);
+        if(arenaib) SDL_ReleaseGPUBuffer(dev, arenaib);
+        if(pickdownload) SDL_ReleaseGPUTransferBuffer(dev, pickdownload);
+        if(frameupload) SDL_ReleaseGPUTransferBuffer(dev, frameupload);
+        loopv(texuploads) delete texuploads[i];
+        texuploads.setsize(0);
+        if(window) SDL_ReleaseWindowFromGPUDevice(dev, window);
+        SDL_DestroyGPUDevice(dev);
+        dev = NULL;
     }
 
     int api() const { return GFX_SDLGPU; }
@@ -2340,6 +2373,13 @@ struct sdlgpubackend : gfxdevice
 };
 
 static sdlgpubackend *sdlgpuinstance = NULL;
+void gfx_sdlgpu_destroy()
+{
+    if(!sdlgpuinstance) return;
+    sdlgpuinstance->shutdown();
+    delete sdlgpuinstance;
+    sdlgpuinstance = NULL;
+}
 static void setframesinflight() { if(sdlgpuinstance && sdlgpuinstance->dev) SDL_SetGPUAllowedFramesInFlight(sdlgpuinstance->dev, gpuframes); }
 static void setpresentmode() { if(sdlgpuinstance) sdlgpuinstance->displaychanged(); }
 gfxdevice *gfx_sdlgpu()

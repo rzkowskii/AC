@@ -732,7 +732,7 @@ extern bool interceptkey(int sym);
 extern bool inmainloop;
 
 enum { NOT_INITING = 0, INIT_LOAD, INIT_RESET };
-enum { CHANGE_GFX = 1<<0, CHANGE_SOUND = 1<<1 };
+enum { CHANGE_GFX = 1<<0, CHANGE_SOUND = 1<<1, CHANGE_RESTART = 1<<2 };
 extern bool initwarning(const char *desc, int level = INIT_RESET, int type = CHANGE_GFX);
 
 extern Texture *getidenticon(char uhash[PUBKEYSAFE]);
