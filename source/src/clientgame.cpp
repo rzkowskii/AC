@@ -592,8 +592,16 @@ void predictplayer(playerent *d, bool move)
     }
 }
 
+// "spectinterp <ms>": while spectating or watching a demo, other players are drawn that much in the past, on a smooth
+// curve through the positions received for them, instead of being predicted from the last one: smoother, and never
+// corrected after the fact (a prediction that was wrong is). 150 works well (updates come 10 ms or more apart, by the
+// sender's frame rate); below about 100 the next position sometimes isn't there yet. 0 (default) is off. Only
+// spectators see it, so it changes nothing in play.
+VARP(spectinterp, 0, 0, 500);
+
 void moveotherplayers()
 {
+    bool interpolate = spectinterp && (watchingdemo || player1->isspectating());
     loopv(players) if(players[i] && players[i]->type==ENT_PLAYER)
     {
         playerent *d = players[i];
@@ -606,6 +614,7 @@ void moveotherplayers()
         }
         if(d->state==CS_ALIVE || d->state==CS_EDITING)
         {
+            if(interpolate && d->state==CS_ALIVE && d->interpolateposition(lastmillis - spectinterp)) continue;
             if(smoothmove && d->smoothmillis>0) predictplayer(d, true);
             else moveplayer(d, 1, false);
         }

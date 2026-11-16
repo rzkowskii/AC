@@ -465,6 +465,72 @@ public:
     float deltayaw, deltapitch, newyaw, newpitch;
     int smoothmillis;
 
+    // the positions received for this player, to draw it a little in the past, between two of them, while spectating or
+    // watching a demo ("spectinterp"), instead of predicting it from the last one
+    struct posrecord { double millis; vec o; float yaw, pitch; };
+    enum { NUMPOSRECORDS = 24, POSRECORDSPACING = 30 }; // at least 30 ms apart: 24 of them span 690 ms or more
+    posrecord posrecords[NUMPOSRECORDS];
+    int numposrecords, lastposrecord;
+    float posinterval; // the average time between updates
+    double posmillis;  // the evened time of the last update
+    void clearposrecords() { numposrecords = 0; lastposrecord = -1; posinterval = 0; }
+    void addposrecord(int millis)
+    {
+        // a jump (respawn, teleport) starts afresh: no gliding across it
+        if(numposrecords && posrecords[lastposrecord].o.dist(o) > 16.0f) clearposrecords();
+        // Updates are sent at a steady rate, but arrive when a frame (or the network) gets to them, so the time
+        // between arrivals jitters (sent every 10 ms, seen none, one or two a frame at 60 fps), which would make
+        // steady movement look uneven. Their times are evened out: the average interval, pulled gently towards the
+        // arrival.
+        double t = millis;
+        if(numposrecords)
+        {
+            float gap = float(t - posmillis);
+            posinterval = clamp(posinterval > 0 ? posinterval * 0.8f + gap * 0.2f : gap, 5.0f, 250.0f);
+            double even = posmillis + posinterval;
+            posmillis = t = clamp(even + (t - even) * 0.2, posmillis + 1, t);
+            // The rate depends on the sender's frame rate: up to 100 a second, which is more than the curve needs and
+            // would fill the records in 230 ms. Updates too close to the last one kept are left out, so the records
+            // reach back further than the longest "spectinterp" at any rate, and the curve evens out the sampling
+            // over about as long as it does at 25 updates a second.
+            if(t - posrecords[lastposrecord].millis < POSRECORDSPACING) return;
+        }
+        else posmillis = t;
+        lastposrecord = (lastposrecord + 1) % NUMPOSRECORDS;
+        posrecord &r = posrecords[lastposrecord];
+        r.millis = t; r.o = o; r.yaw = yaw; r.pitch = pitch;
+        if(numposrecords < NUMPOSRECORDS) numposrecords++;
+    }
+    // places the player where it was around "millis", on a smooth curve through the positions received then: a cubic
+    // B-spline over four of them, which follows them closely but evens out the unevenness of their sampling (each
+    // client sends what it has at its own frames), so speed and turning don't jerk at each update. Before the oldest
+    // or after the newest position it holds there. False without positions to go by.
+    const posrecord &posrecordago(int i) const { return posrecords[(lastposrecord - clamp(i, 0, numposrecords - 1) + NUMPOSRECORDS) % NUMPOSRECORDS]; }
+    static float angledifference(float a, float b) { float d = a - b; return d > 180 ? d - 360 : (d < -180 ? d + 360 : d); }
+    static float bspline(float p0, float p1, float p2, float p3, float t)
+    {
+        float t2 = t*t, t3 = t2*t, u = 1 - t;
+        return (u*u*u*p0 + (3*t3 - 6*t2 + 4)*p1 + (-3*t3 + 3*t2 + 3*t + 1)*p2 + t3*p3) / 6;
+    }
+    bool interpolateposition(int millis)
+    {
+        if(numposrecords < 2) return false;
+        const posrecord &newest = posrecordago(0);
+        int k = 1; // p1 = posrecordago(k), the newest record at or before "millis" (or the oldest), p2 the one after it
+        while(k < numposrecords - 1 && posrecordago(k).millis > millis) k++;
+        const posrecord &p1 = posrecordago(k), &p2 = posrecordago(k - 1);
+        // their neighbours, or p1/p2 themselves at the ends
+        const posrecord &p0 = k + 1 < numposrecords ? posrecordago(k + 1) : p1, &p3 = k >= 2 ? posrecordago(k - 2) : p2;
+        float span = float(p2.millis - p1.millis), t = span > 0 ? clamp(float(millis - p1.millis) / span, 0.0f, 1.0f) : 1.0f;
+        if(millis >= newest.millis) t = 1;
+        loopi(3) o[i] = bspline(p0.o[i], p1.o[i], p2.o[i], p3.o[i], t);
+        // yaw unwrapped around p1's, so the curve takes the short way round
+        float y0 = p1.yaw + angledifference(p0.yaw, p1.yaw), y2 = p1.yaw + angledifference(p2.yaw, p1.yaw), y3 = y2 + angledifference(p3.yaw, p2.yaw);
+        yaw = fmodf(bspline(y0, p1.yaw, y2, y3, t) + 720, 360);
+        pitch = clamp(bspline(p0.pitch, p1.pitch, p2.pitch, p3.pitch, t), -90.0f, 90.0f);
+        return true;
+    }
+
     vec head;
 
     bool ignored, muted;
@@ -473,7 +539,7 @@ public:
     playerent() : curskin(0), clientnum(-1), lastupdate(0), plag(0), ping(0), address(0), identified(false), lifesequence(0), frags(0), flagscore(0), deaths(0), at3_points(0), tks(0), parkplace(0), parkpoints(0), lastpain(0), lastvoicecom(0), lastdeath(0), clientrole(CR_DEFAULT),
                   team(TEAM_SPECT), spectatemode(SM_NONE), followplayercn(FPCN_VOID), eardamagemillis(0), maxroll(ROLLMOVDEF), maxrolleffect(ROLLEFFDEF), movroll(0), effroll(0), ffov(0), scopefov(0),
                   prevweaponsel(NULL), weaponsel(NULL), nextweaponsel(NULL), primweap(NULL), nextprimweap(NULL), lastattackweapon(NULL),
-                  smoothmillis(-1),
+                  smoothmillis(-1), numposrecords(0), lastposrecord(-1), posinterval(0), posmillis(0),
                   head(-1, -1, -1), ignored(false), muted(false), nocorpse(false)
     {
         type = ENT_PLAYER;

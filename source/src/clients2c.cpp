@@ -197,6 +197,8 @@ void parsepositions(ucharbuf &p)
             updatecrouch(d, ft == 2);
             updateplayerpos(d);
             updatelagtime(d);
+            if(d->state==CS_DEAD) d->clearposrecords();
+            else d->addposrecord(lastmillis);
             extern int smoothmove, smoothdist;
             if(d->state==CS_DEAD)
             {
