@@ -62,3 +62,7 @@ source/macos/build/
 source/src/pgo/
 source/src/*.profraw
 source/src/*.profdata
+
+# built by source/dev_tools/imgcompare.c (see timedemo-compare.sh)
+source/dev_tools/imgcompare
+timedemo-compare/

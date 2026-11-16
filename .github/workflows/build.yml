@@ -1,6 +1,6 @@
 # Builds AssaultCube on Linux and macOS for every push and pull request:
 # - Linux: CMake and the Makefile (client, server, master), clang and g++; the GPU backend's SPIR-V shaders and a
-#   Vulkan run on Mesa lavapipe
+#   Vulkan run on Mesa lavapipe; a timedemo whose frames are compared between runs and between OpenGL and Vulkan
 # - Windows: the Visual Studio project (MSBuild), and a MinGW-w64 cross-build on Linux
 # - macOS: CMake against Homebrew, and the universal, self-contained AssaultCube.app (uploaded as an artifact)
 name: build
@@ -58,8 +58,26 @@ jobs:
           xvfb-run -a -s "-screen 0 1280x800x24" timeout -k 10 120 build/ac_client --gpu --home="$RUNNER_TEMP/vk" --init -t0 -w1280 -h800 \
             --loadmap=ac_desert -e"sleep 5000 [screenshottype 0; screenshot] 1; sleep 7000 [quit] 1"
           grep "renderer: SDL GPU (vulkan)" "$RUNNER_TEMP/vk/clientlog.txt"
-          ! grep -E "SDL GPU: .*(fail|no SPIR-V|no device)" "$RUNNER_TEMP/vk/clientlog.txt"
+          if grep -E "SDL GPU: .*(fail|no SPIR-V|no device)" "$RUNNER_TEMP/vk/clientlog.txt"; then exit 1; fi
           ls "$RUNNER_TEMP"/vk/screenshots/*.bmp
+      - name: Timedemo image check (the same demo frames, drawn twice with OpenGL and once with Vulkan, compared)
+        if: matrix.compiler == 'clang'
+        run: |
+          # shellcheck disable=SC2046 # (pkg-config's flags are meant to be split)
+          cc -O2 -I source/src $(pkg-config --cflags sdl3) -o source/dev_tools/imgcompare source/dev_tools/imgcompare.c $(pkg-config --libs sdl3) -lm
+          # (30 demo seconds with a screenshot every 10: two pairs, at 10 and 20 s. Two runs of the same renderer draw
+          # exactly the same frames: every pixel must match. A client that hangs is stopped after 10 minutes.)
+          source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -t 0 -m 100 -o "$RUNNER_TEMP/timedemo-gl" \
+            source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gl"
+          source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -m 98 -o "$RUNNER_TEMP/timedemo-vulkan" \
+            source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gpu"
+      - name: Upload the timedemo screenshots and differences (on failure)
+        if: failure() && matrix.compiler == 'clang'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timedemo-compare
+          path: ${{ runner.temp }}/timedemo-*
+          if-no-files-found: ignore
       - name: Makefile build
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then CXX=clang++; else CXX=g++; fi
