@@ -58,6 +58,10 @@ server_autoconfigured.bat
 source/macos/deps/
 source/macos/build/
 
+# Linux AppImage build (source/linux/make-appimage.sh)
+source/linux/deps/
+source/linux/build/
+
 # profile-guided optimisation data (source/dev_tools/pgo-build.sh)
 source/src/pgo/
 source/src/*.profraw

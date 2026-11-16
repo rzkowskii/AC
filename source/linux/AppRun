@@ -1,0 +1,61 @@
+#!/bin/sh
+# Entry point of the AssaultCube AppImage (built by source/linux/make-appimage.sh).
+#
+#   AssaultCube-<version>-<arch>.AppImage [game options]
+#     Starts the game. Like assaultcube.sh, it keeps settings, maps, demos, screenshots and logs in ~/.assaultcube/v1.4
+#     ("--home=$HOME/.assaultcube/v1.4 --init"), unless the options include --home or --init. All options are passed on,
+#     for example -t1 (fullscreen), -w1280 -h720, --gpu (Vulkan renderer), --loadmap=ac_desert, assaultcube://host:port.
+#
+#   AssaultCube-<version>-<arch>.AppImage server [server options]
+#     Starts the standalone server (ac_server) in a folder of its own: ~/.assaultcube/v1.4/server, or the folder given in
+#     the AC_SERVER_DIR environment variable. On its first start the folder gets the default server configuration
+#     (config/maprot.cfg, config/servercmdline.txt, ...), which is then never overwritten. Like server.sh, the server
+#     reads config/servercmdline.txt; options given here take precedence, e.g. "server -c12 -nMyServer". Logs and demos
+#     are written to that folder too. See docs/commandline.html for all options.
+#
+#   AssaultCube-<version>-<arch>.AppImage --appimage-help
+#     The AppImage's own options, e.g. --appimage-extract (handled before this script runs).
+
+HERE="$(dirname "$(readlink -f "$0")")"
+DATA="$HERE/usr/share/assaultcube"
+[ -n "${HOME:-}" ] || { echo "AssaultCube: HOME is not set" >&2; exit 1; }
+
+if [ "${1:-}" = server ]; then
+  shift
+  dir="${AC_SERVER_DIR:-$HOME/.assaultcube/v1.4/server}"
+  mkdir -p "$dir/config" "$dir/packages/maps/servermaps/incoming" "$dir/logs" "$dir/demos" || exit 1
+  for f in "$DATA"/config/maprot.cfg "$DATA"/config/servercmdline.txt "$DATA"/config/serverparameters.cfg \
+           "$DATA"/config/serverpwd.cfg "$DATA"/config/serverblacklist.cfg "$DATA"/config/nicknameblacklist.cfg \
+           "$DATA"/config/forbidden.cfg "$DATA"/config/geoip.cfg "$DATA"/config/serverinfo_*.txt "$DATA"/config/motd_*.txt; do
+    [ -e "$dir/config/${f##*/}" ] || cp "$f" "$dir/config/" || exit 1
+  done
+  # the official maps come from this AppImage, so they always match its game version: a link into the AppImage, renewed
+  # on every start (the AppImage is mounted at a different place each time). A real folder put there is left alone.
+  official="$dir/packages/maps/official"
+  if [ -L "$official" ] || [ ! -e "$official" ]; then
+    ln -sfn "$DATA/packages/maps/official" "$official" || exit 1
+  fi
+  cd "$dir" || exit 1
+  echo "AssaultCube server folder: $dir"
+  exec "$HERE/usr/bin/ac_server" -Cconfig/servercmdline.txt "$@"
+fi
+
+# The game runs from its data folder inside the AppImage. A relative --home=<folder> refers to the folder the AppImage
+# was started from ($OWD, set by the AppImage runtime), not to the data folder (which is read-only).
+owd="${OWD:-$PWD}"
+custom=0
+n=$#
+while [ "$n" -gt 0 ]; do
+  a="$1"; shift; n=$((n - 1))
+  case "$a" in
+    --home=/*) custom=1 ;;
+    --home=*) custom=1; a="--home=$owd/${a#--home=}" ;;
+    --home|--init|--init=*) custom=1 ;;
+  esac
+  set -- "$@" "$a"
+done
+cd "$DATA" || exit 1
+if [ "$custom" = 1 ]; then
+  exec "$HERE/usr/bin/assaultcube" "$@"
+fi
+exec "$HERE/usr/bin/assaultcube" --home="$HOME/.assaultcube/v1.4" --init "$@"

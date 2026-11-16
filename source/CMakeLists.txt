@@ -5,7 +5,8 @@
 #
 # Produces build/ac_client, build/ac_server and build/ac_master; run the client from the repository root, e.g.
 #   build/ac_client --home="$HOME/.assaultcube/v1.4" --init
-# For a distributable, self-contained macOS app use source/macos/make-app.sh instead.
+# For a distributable, self-contained macOS app use source/macos/make-app.sh instead, for a Linux AppImage
+# source/linux/make-appimage.sh.
 #
 # Options: -DAC_CLIENT=OFF / -DAC_SERVER=OFF / -DAC_MASTER=OFF, -DAC_LTO=ON, -DAC_MARCH=x86-64-v3
 cmake_minimum_required(VERSION 3.16)
@@ -69,7 +70,8 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig QUIET)
 
 # A dependency as an imported target: the library's own CMake package if it has one, else pkg-config, else a plain
-# search for its libraries and header (pkg-config isn't always installed, and libvorbis ships no CMake package).
+# search for its libraries and header (pkg-config isn't always installed, and distributions build libvorbis without
+# its CMake package).
 # ac_dependency(<target> <cmake package> <cmake target> <pkg-config module> <header> <header subdir> <libraries...>)
 function(ac_dependency target package packagetarget pcmodule header headersuffix)
   string(MAKE_C_IDENTIFIER "${target}" id) # variable-name-safe version of the target name (which contains "::")
@@ -116,7 +118,8 @@ set(SERVER_SOURCES ${SRC}/crypto.cpp ${SRC}/log.cpp ${SRC}/protocol.cpp ${SRC}/s
 
 if(AC_CLIENT)
   find_package(OpenGL REQUIRED)
-  ac_dependency(ac::vorbisfile "" "" vorbisfile vorbis/vorbisfile.h "" vorbisfile vorbis ogg)
+  # (libvorbis has a CMake package when it was built with CMake, like the static build in source/linux/build-deps.sh)
+  ac_dependency(ac::vorbisfile Vorbis Vorbis::vorbisfile vorbisfile vorbis/vorbisfile.h "" vorbisfile vorbis ogg)
   find_package(OpenAL REQUIRED)
   file(GLOB CLIENT_SOURCES ${SRC}/*.cpp ${SRC}/bot/*.cpp)
   list(REMOVE_ITEM CLIENT_SOURCES ${SRC}/master.cpp ${SRC}/pch.cpp)

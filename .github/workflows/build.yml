@@ -1,6 +1,7 @@
 # Builds AssaultCube on Linux and macOS for every push and pull request:
 # - Linux: CMake and the Makefile (client, server, master), clang and g++; the GPU backend's SPIR-V shaders and a
-#   Vulkan run on Mesa lavapipe; a timedemo whose frames are compared between runs and between OpenGL and Vulkan
+#   Vulkan run on Mesa lavapipe; a timedemo whose frames are compared between runs and between OpenGL and Vulkan; the
+#   x86_64 AppImage (uploaded as an artifact)
 # - Windows: the Visual Studio project (MSBuild), and a MinGW-w64 cross-build on Linux
 # - macOS: CMake against Homebrew, and the universal, self-contained AssaultCube.app (uploaded as an artifact)
 name: build
@@ -78,6 +79,31 @@ jobs:
           name: timedemo-linux
           path: ${{ runner.temp }}/timedemo-*
           if-no-files-found: ignore
+      - name: AppImage dependencies (built from source; cached until source/linux/build-deps.sh changes)
+        if: matrix.compiler == 'clang'
+        uses: actions/cache@v4
+        with:
+          path: |
+            source/linux/deps/x86_64
+            source/linux/deps/tools-x86_64
+          key: appimage-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('source/linux/build-deps.sh') }}
+      - name: AppImage (source/linux/make-appimage.sh, run on Mesa llvmpipe under Xvfb)
+        if: matrix.compiler == 'clang'
+        run: |
+          sudo apt-get install -y --no-install-recommends libxtst-dev libdecor-0-dev libdbus-1-dev libudev-dev \
+            libibus-1.0-dev libpipewire-0.3-dev libpulse-dev libasound2-dev rsync zip file libgl1-mesa-dri
+          source/linux/make-appimage.sh
+          APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout -k 10 120 source/linux/build/AssaultCube-*.AppImage \
+            --home="$RUNNER_TEMP/appimage" --init -t0 -w1280 -h800 \
+            --loadmap=ac_desert -e"sleep 5000 [screenshottype 0; screenshot] 1; sleep 7000 [quit] 1"
+          grep "Renderer: llvmpipe" "$RUNNER_TEMP/appimage/clientlog.txt"
+          ls "$RUNNER_TEMP"/appimage/screenshots/*.bmp
+      - uses: actions/upload-artifact@v4
+        if: matrix.compiler == 'clang'
+        with:
+          name: AssaultCube-Linux-x86_64
+          path: source/linux/build/AssaultCube-*.AppImage
+          if-no-files-found: error
       - name: Makefile build
         run: |
           if [ "${{ matrix.compiler }}" = clang ]; then CXX=clang++; else CXX=g++; fi
