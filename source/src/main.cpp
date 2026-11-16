@@ -924,6 +924,10 @@ COMMAND(resetgl, "");
 VARFP(maxfps, 0, 200, 1000, if(maxfps && maxfps < 25) maxfps = 25);
 VARP(gpusync, 0, 0, 1);
 VARP(fpslimitspin, 0, 250, 2000); // microseconds at the end of each capped frame that are busy-waited instead of slept, to absorb OS timer jitter
+// While the window is in the background (another window has the input focus, or it's minimized) there's no point in
+// drawing at full speed: it only costs battery and heat. 60 fps keeps the game, network updates and a local server
+// running as usual (they need 25-60 frames per second) and the picture smooth on a second display. 0: no extra cap.
+VARP(maxfpsbackground, 0, 60, 1000);
 
 // high-resolution clock: milliseconds with sub-millisecond precision, on the same epoch as SDL_GetTicks()
 double hrclockms()
@@ -1153,16 +1157,33 @@ static void precisesleep(double ms)
 #endif
 }
 
+// this frame's frame rate cap: maxfps, or maxfpsbackground while the window is in the background (except during a benchmark)
+static int framecap(bool &background)
+{
+    background = false;
+    if(!maxfpsbackground || benchactive || !screen) return maxfps;
+    if(!minimized && (SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS)) return maxfps;
+    background = true;
+    return maxfps ? min(maxfps, maxfpsbackground) : maxfpsbackground;
+}
+
 // frame limiter: frames are started on a fixed grid of 1000/maxfps ms, measured with the high-resolution clock.
 // The old limiter slept whole milliseconds with SDL_Delay and assumed the sleep was exact, so rounding and OS oversleep
 // showed up as uneven frame times (and a lower than requested fps).
 void limitfps()
 {
     static double nextframe = -1, oversleep = 0;
-    if(!maxfps) { nextframe = -1; return; }
-    const double period = 1000.0 / maxfps;
+    bool background;
+    int fpscap = framecap(background);
+    if(!fpscap) { nextframe = -1; return; }
+    const double period = 1000.0 / fpscap;
     double now = hrclockms();
     if(nextframe < 0 || now - nextframe > period) nextframe = now; // first frame, or more than one frame late: resync instead of rushing to catch up
+    else if(background)
+    {
+        // in the background exact timing doesn't matter, and the OS wakes background apps up later than usual: just sleep
+        if(nextframe > now) precisesleep(nextframe - now);
+    }
     else
     {
         // The OS wakes sleeping threads up late, by a varying amount (timer coalescing, scheduling), so the last part of the
