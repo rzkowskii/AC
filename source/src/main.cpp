@@ -1113,31 +1113,170 @@ static void benchframe(double now) // called once per frame with the frame's sta
     }
 }
 
+// a window without focus can be composited at a lower rate (measured: 120 instead of 144 Hz for a Metal window):
+// measure the window the way it's played, in front. Returns whether it had to be raised.
+static bool benchraisewindow()
+{
+    if(!screen || (SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS)) return false;
+    SDL_RaiseWindow(screen);
+    return true;
+}
+
+static void benchbegin(int seconds, bool spin, double waituntil)
+{
+    benchframes.setsize(0);
+    benchseconds = seconds;
+    benchprev = -1;
+    benchspin = spin;
+    benchspinyaw = player1->yaw;
+    benchactive = true;
+    benchwaituntil = waituntil;
+    if(screen) clientlogf("benchmark: %s, %s, renderer %s", SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN ? "fullscreen" : "window",
+        SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS ? "focused" : "not focused", gfx->name());
+}
+
 void benchmark(int *seconds, int *spin)
 {
     if(benchactive) { rpreport(); benchreport(); }
     else if(*seconds <= 0) conoutf("benchmark: not running");
     if(*seconds <= 0) return;
-    benchframes.setsize(0);
-    benchseconds = *seconds;
-    benchprev = -1;
-    benchspin = *spin != 0;
-    if(benchspin && multiplayer(NULL)) { conoutf("benchmark: the camera spin is only available in singleplayer"); benchspin = false; }
-    benchspinyaw = player1->yaw;
-    benchactive = true;
-    conoutf("benchmark: recording frame times for %d seconds%s", benchseconds, benchspin ? ", turning the camera through 360 degrees" : "");
-    // a window without focus can be composited at a lower rate (measured: 120 instead of 144 Hz for a Metal window):
-    // measure the window the way it's played, in front, once bringing it there has settled
-    benchwaituntil = 0;
-    if(screen && !(SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS))
-    {
-        SDL_RaiseWindow(screen);
-        benchwaituntil = hrclockms() + 1000;
-    }
-    if(screen) clientlogf("benchmark: %s, %s, renderer %s", SDL_GetWindowFlags(screen) & SDL_WINDOW_FULLSCREEN ? "fullscreen" : "window",
-        SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS ? "focused" : "not focused", gfx->name());
+    bool turn = *spin != 0;
+    if(turn && multiplayer(NULL)) { conoutf("benchmark: the camera spin is only available in singleplayer"); turn = false; }
+    conoutf("benchmark: recording frame times for %d seconds%s", *seconds, turn ? ", turning the camera through 360 degrees" : "");
+    benchbegin(*seconds, turn, benchraisewindow() ? hrclockms() + 1000 : 0); // once bringing the window to the front has settled
 }
 COMMAND(benchmark, "ii");
+
+// timedemo: "timedemo <demo> [game seconds] [screenshot every n game seconds]" plays a demo as fast as the computer can
+// draw it, with the game time advancing by a fixed timedemostep ms every frame. Times count from when the (local)
+// server starts playing the demo, and the random generator and the physics steps are reset then: every run draws the
+// same frames. That makes it a repeatable benchmark of real gameplay (players, weapons, particles; reported like
+// "benchmark", from 2 demo seconds in until the demo or the given time ends), and with a screenshot interval it saves
+// the same frames in every run, as screenshots/timedemo_<demo>_<demo ms>, for comparing builds or renderers.
+// (The same frames of the game: the console, the HUD messages and the fps counter run on real time, so scripts that
+// compare screenshots hide them: "showstats 0; consize 0; hidehudmsgs 1".)
+VARP(timedemostep, 1, 16, 100); // whole milliseconds, so every run splits the demo into the same frames
+static string timedemoname = "";
+static int timedemostate = 0, timedemoseconds = 0, timedemoshotinterval = 0, timedemogame = 0, timedemonextshot = 0, timedemoframes = 0;
+static double timedemostarted = 0;
+static bool timedemomapdrawn = false; // a frame was drawn with a map loaded, while waiting to start the demo
+enum { TD_OFF = 0, TD_WAITMAP, TD_LOADING, TD_PLAYING };
+static const int TIMEDEMO_SETTLE = 2000; // game ms before frame times are recorded (map load, first packets)
+
+void timedemo(char *name, int *seconds, int *shotinterval)
+{
+    if(!name[0]) { conoutf("usage: timedemo <demo> [game seconds] [screenshot every n game seconds]"); return; }
+    if(multiplayer(NULL)) { conoutf("timedemo: not available while connected to a server"); return; }
+    if(benchactive) { rpreport(); benchreport(); }
+    copystring(timedemoname, name);
+    timedemoseconds = max(0, *seconds);
+    timedemoshotinterval = max(0, *shotinterval) * 1000;
+    timedemogame = timedemoframes = timedemonextshot = 0;
+    timedemomapdrawn = false;
+    timedemostarted = hrclockms();
+    benchraisewindow(); // in front well before recording starts
+    timedemostate = TD_WAITMAP; // at startup (-e), the startup map has to be loaded first, or it replaces the demo
+}
+COMMAND(timedemo, "sii");
+
+static void timedemostartdemo()
+{
+    timedemostate = TD_LOADING;
+    timedemostarted = hrclockms();
+    seedMT(1);
+    defformatstring(cmd)("demo %s", escapestring(timedemoname));
+    execute(cmd);
+}
+
+static void timedemostop(const char *why)
+{
+    double fps = benchactive && benchframes.length() && benchprev > benchstart ? 1000.0 * benchframes.length() / (benchprev - benchstart) : 0;
+    if(benchactive) { rpreport(); benchreport(); }
+    conoutf("timedemo: %s %s after %.1f demo seconds, %d frames (game time step %d ms)", timedemoname, why, timedemogame / 1000.0f, timedemoframes, timedemostep);
+    timedemostate = TD_OFF;
+    exechook(HOOK_SP, "onTimedemoEnd", "%d %d %.1f", timedemoframes, timedemogame / 1000, fps); // e.g. for scripts that quit then
+}
+
+// this frame's game time step while a timedemo runs (curtime otherwise)
+static int timedemotime(int curtime)
+{
+    if(timedemostate == TD_OFF) return curtime;
+    if(timedemostate == TD_WAITMAP)
+    {
+        extern int maploads;
+        // The local server answers the connect at startup from a thread (polldeferredprocessing()), so the startup map
+        // arrives a frame earlier or later from run to run. Two things make the runs the same from there:
+        // - the game clock stands still until the demo is started (after its first step: nothing is updated at 0), so
+        //   its value (which animations use) is the same in every run started the same way (e.g. "-e" at startup)
+        // - the demo is started after a frame with the startup map was drawn: the first frames of the program aren't
+        //   drawn, so the demo's first frame (which draws the minimap, at that game time) was drawn or not otherwise
+        if(maploads && (timedemomapdrawn || minimized)) timedemostartdemo();
+        else if(lastmillis) return 0;
+        // fixed steps from here on: the demo's clock starts with the demo command
+        return timedemostep;
+    }
+    extern int localdemomillis();
+    int demomillis = localdemomillis();
+    if(timedemostate == TD_LOADING)
+    {
+        if(demomillis >= 0)
+        {
+            // the demo started on the server: from here on every run is the same. Reset the random numbers, and the
+            // physics steps' phase (which carries the earlier frames' timing over otherwise)
+            timedemostate = TD_PLAYING;
+            seedMT(1);
+            extern int lastphysframe;
+            lastphysframe = lastmillis;
+        }
+        else if(hrclockms() - timedemostarted > 15000) { timedemostop("didn't start"); return curtime; }
+    }
+    else if(timedemostate == TD_PLAYING)
+    {
+        if(demomillis < 0 || !watchingdemo) { timedemostop("ended"); return curtime; }
+        timedemogame = demomillis;
+        timedemoframes++;
+        if(!benchactive && timedemogame >= TIMEDEMO_SETTLE)
+        {
+            closemenu(NULL); // a benchmark of the game, not of a menu (the main menu opens with the demo's map)
+            benchbegin(1000000, false, 0);
+        }
+        if(timedemoseconds && timedemogame >= timedemoseconds * 1000) { timedemostop("finished"); return curtime; }
+    }
+    return timedemostep;
+}
+
+// a timedemo plays the same in every run: the mouse and keyboard don't steer it (in a demo, clicks and the mouse wheel
+// switch the spectated player and view). Escape stops it.
+static bool timedemoignores(const SDL_Event &e)
+{
+    if(timedemostate == TD_OFF) return false;
+    switch(e.type)
+    {
+        case SDL_EVENT_KEY_DOWN:
+            if(e.key.key == SDLK_ESCAPE) timedemostop("stopped");
+            return true;
+        case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT: case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: case SDL_EVENT_MOUSE_WHEEL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// called after the frame is drawn, before it's presented: the frame for this game time is complete
+static void timedemoframedrawn()
+{
+    extern int maploads;
+    if(timedemostate == TD_WAITMAP && maploads) timedemomapdrawn = true;
+    if(timedemostate != TD_PLAYING || !timedemoshotinterval || timedemogame < timedemonextshot) return;
+    if(!timedemonextshot) timedemonextshot = timedemoshotinterval; // no screenshot of the loading frames
+    else
+    {
+        defformatstring(name)("timedemo_%s_%06d", behindpath(timedemoname), timedemonextshot);
+        screenshot(name);
+        timedemonextshot += timedemoshotinterval;
+    }
+}
 
 #ifndef WIN32
 #include <sched.h>
@@ -1217,6 +1356,14 @@ void fpsrange(int *low, int *high)
 }
 
 COMMAND(fpsrange, "ii");
+
+// how the world's level of detail changes this frame: it follows the measured frame rate, which differs between runs, so
+// a timedemo keeps it at its most detailed (where any fast computer has it), and every run draws the same world
+static float lodchange(float fps)
+{
+    if(timedemostate) return 1000.0f; // (any factor this large takes it straight to the most detailed)
+    return fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f);
+}
 
 int keyrepeatmask = 0, textinputmask = 0; // bunches of flags for the same functions
 Uint64 textinputtime = 0;
@@ -1337,6 +1484,7 @@ void checkinput()
     while(events.length() || SDL_PollEvent(&event))
     {
         if(events.length()) event = events.remove(0);
+        if(timedemoignores(event)) continue;
 
         EVENTDEBUG(int thres = 1; defformatstring(eb)("EVENT %d", event.type));
 
@@ -2094,6 +2242,7 @@ int main(int argc, char **argv)
             int scaledtime = elapsed*gamespeed + timeerr;
             curtime = scaledtime/100;
             timeerr = scaledtime%100;
+            curtime = timedemotime(curtime);
             if(!watchingdemo) skipmillis = 0;
             if(skipmillis && watchingdemo)
             {
@@ -2107,7 +2256,7 @@ int main(int argc, char **argv)
         totalmillis = millis;
         // game time only has the real clock's sub-millisecond phase when it advances 1:1 with real time
         extern float lastmillisfrac;
-        lastmillisfrac = curtime == elapsed && !(multiplayer(NULL) ? ispaused : paused) ? millisfrac : 0;
+        lastmillisfrac = curtime == elapsed && !timedemostate && !(multiplayer(NULL) ? ispaused : paused) ? millisfrac : 0;
 
         resolvedepth(); // worldpos from the previous frame's depth read, before anything (input, shooting) can use it
         rpmark(RP_DEPTHRESOLVE);
@@ -2131,7 +2280,8 @@ int main(int argc, char **argv)
         rpmark(RP_OCCLUSION);
         if(frames>3 && !minimized)
         {
-            gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
+            gl_drawframe(screenw, screenh, lodchange(fps), fps, elapsed);
+            timedemoframedrawn();
             if(frames>4) gfx->present();
             if(frames>300 && gpulockfile[0]) cleargpulock(); // the GPU backend got going
             // "gpusync 1": wait for the GPU to finish the frame, so the driver can't queue frames ahead. Costs throughput
@@ -2148,7 +2298,7 @@ int main(int argc, char **argv)
             // in the screenshot regardless of which frame buffer is current
             if(!minimized)
             {
-                gl_drawframe(screenw, screenh, fps<lowfps ? fps/lowfps : (fps>highfps ? fps/highfps : 1.0f), fps, elapsed);
+                gl_drawframe(screenw, screenh, lodchange(fps), fps, elapsed);
             }
             addsleep(0, "screenshot");
             needsautoscreenshot = false;

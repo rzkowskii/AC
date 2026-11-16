@@ -1261,6 +1261,12 @@ bool watchingdemo = false;
 stream *demoplayback = NULL;
 int nextplayback = 0;
 
+#ifndef STANDALONE
+// the local server's demo clock (game milliseconds since the demo started), or -1 while no demo plays: timedemo runs
+// on it, because when playback starts relative to the client's frames depends on real time (client messages)
+int localdemomillis() { return demoplayback ? sg->gamemillis : -1; }
+#endif
+
 void enddemoplayback()
 {
     if(!demoplayback) return;

@@ -927,6 +927,8 @@ static string lastloadedconfigfile;
 
 bool incompatiblemap = false;
 
+int maploads = 0; // maps loaded so far (timedemo waits for the startup map)
+
 int load_world(char *mname)        // still supports all map formats that have existed since the earliest cube betas!
 {
     maploading = true;
@@ -1183,6 +1185,7 @@ int load_world(char *mname)        // still supports all map formats that have e
     maploading = false;
     defformatstring(startmillis)("%d", totalmillis);
     alias("gametimestart", startmillis, true);
+    maploads++;
     startmap(mname);
     res |= mapconfigerror;
     if(res) conoutf("\f3unresolved problems occurred during load_world(), warning: 0x%x", res);
