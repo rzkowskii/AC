@@ -103,11 +103,11 @@ void updateplayerpos(playerent *d)
 
 void updatelagtime(playerent *d)
 {
-    int lagtime = totalmillis-d->lastupdate;
+    int lagtime = lastmillis-d->lastupdate; // game time (see moveotherplayers())
     if(lagtime)
     {
         if(d->state!=CS_SPAWNING && d->lastupdate) d->plag = (d->plag*5+lagtime)/6;
-        d->lastupdate = totalmillis;
+        d->lastupdate = lastmillis;
     }
 }
 

@@ -490,7 +490,7 @@ void spawnstate(playerent *d)              // reset player state not persistent 
 playerent *newplayerent()                 // create a new blank player
 {
     playerent *d = new playerent;
-    d->lastupdate = totalmillis;
+    d->lastupdate = lastmillis;
     setskin(d, rnd(6));
     weapon::equipplayer(d); // flowtron : avoid overwriting d->spawnstate(gamemode) stuff from the following line (this used to be called afterwards)
     spawnstate(d);
@@ -500,7 +500,7 @@ playerent *newplayerent()                 // create a new blank player
 botent *newbotent()                 // create a new blank player
 {
     botent *d = new botent;
-    d->lastupdate = totalmillis;
+    d->lastupdate = lastmillis;
     setskin(d, rnd(6));
     weapon::equipplayer(d);
     spawnstate(d); // move like above
@@ -597,7 +597,7 @@ void moveotherplayers()
     loopv(players) if(players[i] && players[i]->type==ENT_PLAYER)
     {
         playerent *d = players[i];
-        const int lagtime = totalmillis-d->lastupdate;
+        const int lagtime = lastmillis-d->lastupdate; // game time: a demo played slowly or paused isn't lag
         if(!lagtime || intermission || ispaused) continue;
         else if(lagtime>1000 && d->state==CS_ALIVE)
         {
