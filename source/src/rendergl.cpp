@@ -738,7 +738,10 @@ bool reflecting = false, refracting = false;
 GLuint reflecttex = 0, refracttex = 0;
 int reflectlastsize = 0;
 
-VARP(reflectsize, 6, 8, 10);
+// the water reflection's size: 1<<reflectsize pixels square, 64 to 4096 (sizes below 64 count as 64), limited by the
+// window unless it's drawn through a framebuffer (reflectfbo); 0: the largest that fits the window (1024 in a 2560x1600
+// window, 2048 at 3840x2160), so it stays about as sharp as the screen
+VARP(reflectsize, 0, 8, 12);
 VAR(reflectclip, 0, 3, 100);
 VARP(waterreflect, 0, 1, 1);
 VARP(waterrefract, 0, 0, 1);
@@ -796,8 +799,9 @@ void drawreflection(float hf, int w, int h, float changelod, bool refract)
     reflecting = true;
     refracting = refract;
 
-    int size = 1<<reflectsize, sizelimit = hasFBO && reflectfbo ? hwtexsize : min(hwtexsize, min(w, h));
-    while(size > sizelimit) size /= 2;
+    int sizelimit = hasFBO && reflectfbo ? hwtexsize : min(hwtexsize, min(w, h)), size = reflectsize ? 1<<max(reflectsize, 6) : 1<<12;
+    if(!reflectsize) sizelimit = min(sizelimit, min(w, h));
+    while(size > sizelimit && size > 64) size /= 2;
     if(size!=reflectlastsize)
     {
         if(reflecttex) gfx->deletetextures(1, &reflecttex);
