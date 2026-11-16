@@ -243,6 +243,10 @@ static const char *mslpost =
 // Vulkan takes SPIR-V: the same shaders in GLSL 450 are in gpushaders/ (kept in step with the MSL above), compiled for
 // every variant by gpushaders/build.sh into gfx_sdlgpu_spirv.h, which is committed.
 #include "gfx_sdlgpu_spirv.h"
+#ifdef WIN32
+// and the same shaders as DXBC (shader model 5.1, through SPIRV-Cross's HLSL) for SDL GPU's Direct3D 12 driver
+#include "gfx_sdlgpu_dxbc.h"
+#endif
 
 struct vsuniforms { float mvp[16], mv[16], color[4], tex0[16], tex1[16]; };
 struct gpuunit { int rgb[4], rgbop[4], alpha[4], alphaop[4]; float k[4]; };
@@ -532,10 +536,15 @@ struct sdlgpubackend : gfxdevice
     bool init(SDL_Window *w, int wantsamples, int vsync)
     {
         window = w;
-        dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, false, NULL);
+        SDL_GPUShaderFormat formats = SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV;
+#ifdef WIN32
+        formats |= SDL_GPU_SHADERFORMAT_DXBC; // (SDL picks Vulkan or Direct3D 12; SDL_GPU_DRIVER=direct3d12 or vulkan chooses)
+#endif
+        dev = SDL_CreateGPUDevice(formats, false, NULL);
         if(!dev) { conoutf("\f3SDL GPU: no device (%s)", SDL_GetError()); return false; }
-        // MSL source (Metal) where the driver takes it, otherwise the precompiled SPIR-V (Vulkan)
-        format = SDL_GetGPUShaderFormats(dev) & SDL_GPU_SHADERFORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : SDL_GPU_SHADERFORMAT_SPIRV;
+        // MSL source (Metal) where the driver takes it, otherwise precompiled DXBC (Direct3D 12) or SPIR-V (Vulkan)
+        SDL_GPUShaderFormat supported = SDL_GetGPUShaderFormats(dev);
+        format = supported & SDL_GPU_SHADERFORMAT_MSL ? SDL_GPU_SHADERFORMAT_MSL : (supported & SDL_GPU_SHADERFORMAT_DXBC ? SDL_GPU_SHADERFORMAT_DXBC : SDL_GPU_SHADERFORMAT_SPIRV);
         mesastyle = format != SDL_GPU_SHADERFORMAT_MSL;
         if(!SDL_ClaimWindowForGPUDevice(dev, window))
         {
@@ -655,8 +664,8 @@ struct sdlgpubackend : gfxdevice
 
     SDL_GPUShader *makepostshader(const char *entry, SDL_GPUShaderStage stage, int samplers, int uniforms)
     {
-        if(format == SDL_GPU_SHADERFORMAT_SPIRV)
-            return makespirvshader(!strcmp(entry, "vpost") ? "post.vert" : (!strcmp(entry, "fgamma") ? "gamma.frag" : "fxaa.frag"), 0, stage, samplers, uniforms);
+        if(format != SDL_GPU_SHADERFORMAT_MSL) // (precompiled: SPIR-V or DXBC)
+            return makeprecompiledshader(!strcmp(entry, "vpost") ? "post.vert" : (!strcmp(entry, "fgamma") ? "gamma.frag" : "fxaa.frag"), 0, stage, samplers, uniforms);
         SDL_GPUShaderCreateInfo si;
         memset(&si, 0, sizeof(si));
         si.code = (const Uint8 *)mslpost;
@@ -780,24 +789,34 @@ struct sdlgpubackend : gfxdevice
 
     // --- shaders and pipelines
 
-    // a precompiled SPIR-V module (gfx_sdlgpu_spirv.h)
-    SDL_GPUShader *makespirvshader(const char *name, int variant, SDL_GPUShaderStage stage, int samplers, int uniforms)
+    // a precompiled module: SPIR-V (gfx_sdlgpu_spirv.h) or, for Direct3D 12, DXBC (gfx_sdlgpu_dxbc.h)
+    SDL_GPUShader *makeprecompiledshader(const char *name, int variant, SDL_GPUShaderStage stage, int samplers, int uniforms)
     {
-        const gpuspirv *m = NULL;
+        const Uint8 *code = NULL;
+        size_t size = 0;
+#ifdef WIN32
+        if(format == SDL_GPU_SHADERFORMAT_DXBC)
+        {
+            loopi(int(sizeof(gpudxbcshaders)/sizeof(gpudxbcshaders[0])))
+                if(gpudxbcshaders[i].variant == variant && !strcmp(gpudxbcshaders[i].name, name)) { code = gpudxbcshaders[i].code; size = gpudxbcshaders[i].size; break; }
+        }
+        else
+#endif
         loopi(int(sizeof(gpuspirvshaders)/sizeof(gpuspirvshaders[0])))
-            if(gpuspirvshaders[i].variant == variant && !strcmp(gpuspirvshaders[i].name, name)) { m = &gpuspirvshaders[i]; break; }
-        if(!m) { conoutf("\f3SDL GPU: no SPIR-V for %s, variant %d", name, variant); return NULL; }
+            if(gpuspirvshaders[i].variant == variant && !strcmp(gpuspirvshaders[i].name, name)) { code = (const Uint8 *)gpuspirvshaders[i].code; size = gpuspirvshaders[i].size; break; }
+        const char *kind = format == SDL_GPU_SHADERFORMAT_DXBC ? "DXBC" : "SPIR-V";
+        if(!code) { conoutf("\f3SDL GPU: no %s for %s, variant %d", kind, name, variant); return NULL; }
         SDL_GPUShaderCreateInfo si;
         memset(&si, 0, sizeof(si));
-        si.code = (const Uint8 *)m->code;
-        si.code_size = m->size;
+        si.code = code;
+        si.code_size = size;
         si.entrypoint = "main";
-        si.format = SDL_GPU_SHADERFORMAT_SPIRV;
+        si.format = format;
         si.stage = stage;
         si.num_samplers = samplers;
         si.num_uniform_buffers = uniforms;
         SDL_GPUShader *s = SDL_CreateGPUShader(dev, &si);
-        if(!s) conoutf("\f3SDL GPU: SPIR-V shader %s (variant %d) failed: %s", name, variant, SDL_GetError());
+        if(!s) conoutf("\f3SDL GPU: %s shader %s (variant %d) failed: %s", kind, name, variant, SDL_GetError());
         return s;
     }
 
@@ -805,10 +824,10 @@ struct sdlgpubackend : gfxdevice
     // 16 = smooth line (the fragment shaders only use 8 and 16)
     SDL_GPUShader *makeshader(const char *body, const char *entry, SDL_GPUShaderStage stage, int variant, int samplers, int uniforms)
     {
-        if(format == SDL_GPU_SHADERFORMAT_SPIRV)
+        if(format != SDL_GPU_SHADERFORMAT_MSL) // (precompiled: SPIR-V or DXBC)
         {
-            if(stage == SDL_GPU_SHADERSTAGE_VERTEX) return makespirvshader("scene.vert", variant & 31, stage, samplers, uniforms);
-            return makespirvshader(body == mslpick ? "pick.frag" : "scene.frag", (variant&8 ? 1 : 0) | (variant&16 ? 2 : 0), stage, samplers, uniforms);
+            if(stage == SDL_GPU_SHADERSTAGE_VERTEX) return makeprecompiledshader("scene.vert", variant & 31, stage, samplers, uniforms);
+            return makeprecompiledshader(body == mslpick ? "pick.frag" : "scene.frag", (variant&8 ? 1 : 0) | (variant&16 ? 2 : 0), stage, samplers, uniforms);
         }
         defformatstring(defs)("#define HAS_TC %d\n#define HAS_COLOR %d\n#define HAS_TC1 %d\n#define TEXMAT %d\n#define LINEAA %d\n",
             variant&1 ? 1 : 0, variant&2 ? 1 : 0, variant&4 ? 1 : 0, variant&8 ? 1 : 0, variant&16 ? 1 : 0);

@@ -71,11 +71,11 @@ jobs:
             source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gl"
           source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -m 98 -o "$RUNNER_TEMP/timedemo-vulkan" \
             source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gpu"
-      - name: Upload the timedemo screenshots and differences (on failure)
-        if: failure() && matrix.compiler == 'clang'
+      - name: Upload the timedemo screenshots (the Windows job compares Direct3D 12 with them)
+        if: always() && matrix.compiler == 'clang'
         uses: actions/upload-artifact@v4
         with:
-          name: timedemo-compare
+          name: timedemo-linux
           path: ${{ runner.temp }}/timedemo-*
           if-no-files-found: ignore
       - name: Makefile build
@@ -97,7 +97,9 @@ jobs:
 
   windows:
     # the Visual Studio project (32-bit), as the Windows releases are built; the runner's Visual Studio 2022 builds it
-    # with its own toolset instead of the project's (2019)
+    # with its own toolset instead of the project's (2019). Then the GPU backend on Direct3D 12 (the runner's software
+    # adapter, WARP), compared with the same demo frames drawn by OpenGL in the Linux job.
+    needs: linux
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -117,12 +119,51 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output "client version: $v"
           if (-not (Test-Path bin_win32\ac_server.exe)) { exit 1 }
+      - name: Direct3D 12 timedemo (the same demo frames as the Linux job's, at 640x400)
+        shell: bash
+        env:
+          SDL_GPU_DRIVER: direct3d12
+        run: |
+          home="$RUNNER_TEMP/d3d12"
+          mkdir -p "$home/config" "$home/demos"
+          cp source/dev_tools/timedemo_ac_desert.dmo "$home/demos/"
+          printf "autodownload 0\naudio 0\nfullscreen 0\nscr_w 640\nscr_h 400\nvsync 0\nscreenshottype 2\n" > "$home/config/init.cfg"
+          printf "onTimedemoEnd = [ quit ]\nmapstartonce = []\n" > "$home/config/autoexec.cfg"
+          timeout -k 10 600 bin_win32/ac_client.exe --gpu --home="$home" --init -t0 -w640 -h400 -v0 \
+            "-emaxfps 0; showstats 0; consize 0; hidehudmsgs 1; timedemo timedemo_ac_desert 30 10" | cat
+          grep -E "renderer: SDL GPU|timedemo:" "$home/clientlog.txt"
+          grep -q "renderer: SDL GPU (direct3d12)" "$home/clientlog.txt"
+          if grep -E "SDL GPU: .*(fail|no DXBC|no device)" "$home/clientlog.txt"; then exit 1; fi
+          ls "$home"/screenshots/timedemo_*.png
+      - uses: actions/download-artifact@v4
+        with:
+          name: timedemo-linux
+          path: ${{ runner.temp }}/linux
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x86
+      - name: Compare Direct3D 12 with OpenGL (Linux)
+        shell: bash
+        run: |
+          cl -nologo -O2 -I source/src -I source/include source/dev_tools/imgcompare.c source/lib/SDL3.lib -Fe:imgcompare.exe
+          export PATH="$PWD/bin_win32:$PATH"
+          n=0
+          for a in "$RUNNER_TEMP"/linux/timedemo-gl/a/screenshots/timedemo_*.png; do
+            f=$(basename "$a")
+            printf "%s: " "$f"
+            ./imgcompare.exe "$a" "$RUNNER_TEMP/d3d12/screenshots/$f" 8 90
+            n=$((n + 1))
+          done
+          [ $n -gt 0 ]
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: AssaultCube-Windows
           path: |
             bin_win32/*.exe
             bin_win32/*.dll
+            ${{ runner.temp }}/d3d12/screenshots
+            ${{ runner.temp }}/d3d12/clientlog.txt
 
   macos:
     runs-on: macos-14
