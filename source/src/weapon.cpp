@@ -34,7 +34,7 @@ void checkweaponswitch()
         addmsg(SV_WEAPCHANGE, "ri", player1->weaponsel->type);
         player1->weaponchanging = 0;
     }
-    else if(timeprogress>(weapon::weaponchangetime>>1) && player1->weaponsel != player1->nextweaponsel)
+    else if(timeprogress>(weapon::weaponchangetime>>1) && player1->nextweaponsel && player1->weaponsel != player1->nextweaponsel) // (respawn() starts this halfway, before a player's first switch: no next weapon yet)
     {
         player1->prevweaponsel = player1->weaponsel;
         player1->weaponsel = player1->nextweaponsel;
