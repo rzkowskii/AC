@@ -83,6 +83,113 @@ void audiomanager::applyhrtf()
     reporthrtf();
 }
 
+// Audio output changes: headphones plugged in or out, a Bluetooth headset connecting, the system's default output
+// changing. OpenAL keeps playing on the device it opened (or goes silent when that device disappears) until the game
+// restarts. OpenAL Soft can move an open device to another output without losing its sources and buffers
+// (ALC_SOFT_reopen_device), reports whether the device is still there (ALC_EXT_disconnect, a flag that's cheap to read
+// every frame) and tells when the system's default output changes (ALC_SOFT_system_events, from its own thread, so the
+// callback only sets a flag).
+#ifndef ALC_CONNECTED
+#define ALC_CONNECTED                               0x313
+#endif
+#ifndef ALC_ALL_DEVICES_SPECIFIER
+#define ALC_ALL_DEVICES_SPECIFIER                   0x1013
+#endif
+#ifndef ALC_PLAYBACK_DEVICE_SOFT
+#define ALC_PLAYBACK_DEVICE_SOFT                    0x19D4
+#define ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT  0x19D6
+#define ALC_EVENT_SUPPORTED_SOFT                    0x19D9
+#endif
+typedef ALCboolean (ALC_APIENTRY *ac_alcreopendevicesoft)(ALCdevice *device, const ALCchar *devicename, const ALCint *attribs);
+typedef void (ALC_APIENTRY *ac_alceventproc)(ALCenum eventtype, ALCenum devicetype, ALCdevice *device, ALCsizei length, const ALCchar *message, void *userparam);
+typedef ALCenum (ALC_APIENTRY *ac_alceventissupportedsoft)(ALCenum eventtype, ALCenum devicetype);
+typedef ALCboolean (ALC_APIENTRY *ac_alceventcontrolsoft)(ALCsizei count, const ALCenum *events, ALCboolean enable);
+typedef void (ALC_APIENTRY *ac_alceventcallbacksoft)(ac_alceventproc callback, void *userparam);
+
+// 1: when the system's default output changes, move the sound there (unless "openaldevice" names a device). Sound
+// servers like PulseAudio and PipeWire may move it themselves.
+VARP(audiofollowdefault, 0, 1, 1);
+
+static ac_alcreopendevicesoft reopendevice = NULL;
+static bool candetectdisconnect = false, musicwasplaying = false;
+static SDL_AtomicInt defaultoutputchanged; // set on OpenAL Soft's event thread
+
+static void ALC_APIENTRY audioevent(ALCenum eventtype, ALCenum devicetype, ALCdevice *device, ALCsizei length, const ALCchar *message, void *userparam)
+{
+    if(devicetype == ALC_PLAYBACK_DEVICE_SOFT && eventtype == ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT) SDL_SetAtomicInt(&defaultoutputchanged, 1);
+}
+
+static void watchoutputs(ALCdevice *device, bool on)
+{
+    if(on)
+    {
+        reopendevice = alcIsExtensionPresent(device, "ALC_SOFT_reopen_device") == ALC_TRUE ? (ac_alcreopendevicesoft) alcGetProcAddress(device, "alcReopenDeviceSOFT") : NULL;
+        candetectdisconnect = alcIsExtensionPresent(device, "ALC_EXT_disconnect") == ALC_TRUE;
+        SDL_SetAtomicInt(&defaultoutputchanged, 0);
+    }
+    if(!alcIsExtensionPresent(NULL, "ALC_SOFT_system_events")) return;
+    ac_alceventcontrolsoft eventcontrol = (ac_alceventcontrolsoft) alcGetProcAddress(NULL, "alcEventControlSOFT");
+    ac_alceventissupportedsoft eventsupported = (ac_alceventissupportedsoft) alcGetProcAddress(NULL, "alcEventIsSupportedSOFT");
+    ac_alceventcallbacksoft eventcallback = (ac_alceventcallbacksoft) alcGetProcAddress(NULL, "alcEventCallbackSOFT");
+    ALCenum event = ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT;
+    if(!eventcontrol || !eventcallback || (eventsupported && eventsupported(event, ALC_PLAYBACK_DEVICE_SOFT) != ALC_EVENT_SUPPORTED_SOFT)) return;
+    if(on) eventcallback(audioevent, NULL);
+    eventcontrol(1, &event, on ? ALC_TRUE : ALC_FALSE);
+    if(!on) eventcallback(NULL, NULL);
+}
+
+void audiomanager::checkdevice()
+{
+    static int nextretry = 0, failures = 0;
+    if(nosound || !device || !reopendevice) return;
+    bool defaultchanged = SDL_GetAtomicInt(&defaultoutputchanged) != 0;
+    if(defaultchanged) SDL_SetAtomicInt(&defaultoutputchanged, 0);
+    ALCint connected = ALC_TRUE;
+    if(candetectdisconnect) alcGetIntegerv(device, ALC_CONNECTED, 1, &connected);
+    const char *devicename = getalias("openaldevice");
+    bool named = devicename && devicename[0];
+    if(connected == ALC_TRUE && !(defaultchanged && !named && audiofollowdefault)) return;
+    if(connected != ALC_TRUE && failures && totalmillis < nextretry) return;
+
+    // the named device if it's there, else the system's default output
+    bool reopened = named && reopendevice(device, devicename, hrtfattribs(device)) == ALC_TRUE;
+    if(!reopened) reopened = reopendevice(device, NULL, hrtfattribs(device)) == ALC_TRUE;
+    if(reopened)
+    {
+        failures = 0;
+        const ALCchar *name = alcIsExtensionPresent(NULL, "ALC_ENUMERATE_ALL_EXT") == ALC_TRUE ? alcGetString(device, ALC_ALL_DEVICES_SPECIFIER) : NULL;
+        conoutf("Sound: %s, now playing on %s", connected == ALC_TRUE ? "the default output changed" : "the audio device was disconnected", name && name[0] ? name : alcGetString(device, ALC_DEVICE_SPECIFIER));
+        reporthrtf();
+        if(connected != ALC_TRUE) restartsounds();
+    }
+    else
+    {
+        nextretry = totalmillis + 2000;
+        if(!failures++) conoutf(connected == ALC_TRUE ? "\f3Sound: could not move to the new default output" : "\f3Sound: the audio device was disconnected, and no other output could be opened (retrying)");
+    }
+}
+
+// After a disconnect, OpenAL Soft stops what was playing (the music measurably stops). So every sound is dropped:
+// looping sounds (map sounds, underwater, heartbeat...) are started again by the next updates, sounds that the
+// disconnect cut off stay gone, and the music, if it was playing in the last frame, continues where it was (from what
+// had been decoded, a few seconds ahead at most).
+void audiomanager::restartsounds()
+{
+    loopv(locations) if(locations[i] && !locations[i]->stale) locations[i]->drop();
+    if(!gamemusic || !gamemusic->isopen || !musicwasplaying) return;
+    string name;
+    copystring(name, gamemusic->name);
+    bool loop = gamemusic->looping;
+    double pos = ov_time_tell(&gamemusic->oggfile);
+    int startmillis = gamemusic->startmillis, endmillis = gamemusic->endmillis, startfade = gamemusic->startfademillis, endfade = gamemusic->endfademillis;
+    gamemusic->reset();
+    if(!gamemusic->open(name)) return;
+    if(pos > 0) ov_time_seek(&gamemusic->oggfile, pos);
+    gamemusic->startmillis = startmillis; gamemusic->endmillis = endmillis; gamemusic->startfademillis = startfade; gamemusic->endfademillis = endfade;
+    gamemusic->playback(loop);
+    setmusicvol(musicvol);
+}
+
 // audio manager
 
 audiomanager::audiomanager()
@@ -105,10 +212,12 @@ void audiomanager::initsound()
     device = NULL;
     context = NULL;
 
-    // list available devices
-    if(alcIsExtensionPresent(NULL, "ALC_ENUMERATION_EXT"))
+    // list available devices (with ALC_ENUMERATE_ALL_EXT the actual outputs: the plain list of OpenAL Soft only names
+    // itself, so it didn't show the names "openaldevice" takes)
+    bool enumerateall = alcIsExtensionPresent(NULL, "ALC_ENUMERATE_ALL_EXT") == ALC_TRUE;
+    if(enumerateall || alcIsExtensionPresent(NULL, "ALC_ENUMERATION_EXT"))
     {
-        const ALCchar *devices = alcGetString(NULL, ALC_DEVICE_SPECIFIER);
+        const ALCchar *devices = alcGetString(NULL, enumerateall ? ALC_ALL_DEVICES_SPECIFIER : ALC_DEVICE_SPECIFIER);
         if(devices)
         {
             string d;
@@ -138,10 +247,12 @@ void audiomanager::initsound()
             alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
 
             // backend infos
-            conoutf("Sound: %s / %s (%s)", alcGetString(device, ALC_DEVICE_SPECIFIER), alGetString(AL_RENDERER), alGetString(AL_VENDOR));
+            const ALCchar *outputname = enumerateall ? alcGetString(device, ALC_ALL_DEVICES_SPECIFIER) : NULL;
+            conoutf("Sound: %s / %s (%s)", outputname && outputname[0] ? outputname : alcGetString(device, ALC_DEVICE_SPECIFIER), alGetString(AL_RENDERER), alGetString(AL_VENDOR));
             conoutf("Driver: %s", alGetString(AL_VERSION));
             hrtfapplied = hrtf;
             reporthrtf();
+            watchoutputs(device, true);
 
             // allocate OpenAL resources
             sourcescheduler::instance().init(16);
@@ -361,6 +472,7 @@ void audiomanager::soundcleanup()
     bufferpool.clear();
 
     // shutdown openal
+    if(device) watchoutputs(device, false);
     alcMakeContextCurrent(NULL);
     if(context) alcDestroyContext(context);
     if(device) alcCloseDevice(device);
@@ -657,6 +769,8 @@ void audiomanager::updateaudio()
 {
     if(nosound) return;
 
+    checkdevice();
+
     alcSuspendContext(context); // don't process sounds while we mess around
 
     bool alive = player1->state==CS_ALIVE;
@@ -748,6 +862,7 @@ void audiomanager::updateaudio()
             }
         }
     }
+    musicwasplaying = gamemusic && gamemusic->playing(); // a disconnect stops the music before the next frame notices
 
     // listener: z is mirrored for OpenAL (see source::position() in openal.cpp), so "up" is -z. The orientation includes
     // the view pitch, so with HRTF, sounds stay where they are in the world when looking up or down. At pitch 0 these

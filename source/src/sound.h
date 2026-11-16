@@ -410,6 +410,8 @@ public:
     void initsound();
     void applyhrtf();   // apply the "hrtf" setting to the open device
     void reporthrtf();  // print whether HRTF is in use, and why
+    void checkdevice(); // follow audio output changes (new default output, device unplugged)
+    void restartsounds(); // after the output was lost: restart looping sounds and the music
     bool preloadmapsound(entity &e, bool trydl = false);
     bool preloadmapsounds(bool trydl = false);
     void applymapsoundchanges();
