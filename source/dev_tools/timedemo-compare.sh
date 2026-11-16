@@ -8,6 +8,8 @@
 #
 #   e.g. (renderers)  source/dev_tools/timedemo-compare.sh mydemo.dmo "build/ac_client --gl" "build/ac_client --gpu"
 #        (builds)     source/dev_tools/timedemo-compare.sh mydemo.dmo "old/ac_client --gl" "build/ac_client --gl"
+#   Add --hidden to the client options on a computer someone is using: the window then never shows or takes the
+#   mouse or the focus.
 #
 # Options: -s demo seconds to play (default 30)   -i seconds between screenshots (10)   -w width (1280)   -h height (800)
 #          -t tolerance per pixel, largest channel difference (8)   -m minimum % of pixels within it (95)

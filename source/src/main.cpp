@@ -154,8 +154,15 @@ static void applymacmousewarp()
 VAR(sdl_xgrab_bug, 0, 0, 1);
 #endif
 
+// --hidden: for automated tests (timedemo comparisons, screenshots) on a computer someone is using: the window is
+// never shown or raised, never grabs the mouse, and on macOS the game runs as a background app (no Dock icon, never
+// takes the focus). The game still draws every frame (the Metal/Vulkan backend draws into its own targets, which
+// screenshots read). It runs windowed, at the background frame rate cap except during benchmarks.
+static bool hiddenwindow = false;
+
 void inputgrab(bool on, bool delay = false)
 {
+    if(hiddenwindow) return;
 #ifdef AC_X11_GRAB
     bool wasrelativemouse = relativemouse;
 #endif
@@ -781,7 +788,8 @@ void setupscreen(int &useddepthbits, int &usedfsaa)
 
     SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE;
     if(highdpi) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    if(fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+    if(hiddenwindow) flags |= SDL_WINDOW_HIDDEN;
+    else if(fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
 
     if(usegpu)
     {
@@ -1117,7 +1125,7 @@ static void benchframe(double now) // called once per frame with the frame's sta
 // measure the window the way it's played, in front. Returns whether it had to be raised.
 static bool benchraisewindow()
 {
-    if(!screen || (SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS)) return false;
+    if(!screen || hiddenwindow || (SDL_GetWindowFlags(screen) & SDL_WINDOW_INPUT_FOCUS)) return false;
     SDL_RaiseWindow(screen);
     return true;
 }
@@ -1972,6 +1980,7 @@ int main(int argc, char **argv)
                         initmode = atoi(&argv[i][11]);
                     }
                     else if(!strcmp(argv[i], "--gpu")) forcerenderer = 1; // the SDL GPU renderer (Metal, Vulkan) for this run
+                    else if(!strcmp(argv[i], "--hidden")) hiddenwindow = true; // no visible window (automated tests, see above)
                     else if(!strcmp(argv[i], "--gl")) forcerenderer = 0;  // OpenGL for this run
                     else if(!strncmp(argv[i], "--loaddemo=", 11))
                     {
@@ -2014,6 +2023,7 @@ int main(int argc, char **argv)
 
     #define SDLVERSIONSTRING  STRINGIFY(SDL_MAJOR_VERSION) "." STRINGIFY(SDL_MINOR_VERSION) "." STRINGIFY(SDL_MICRO_VERSION)
     initlog("sdl (" SDLVERSIONSTRING ")");
+    if(hiddenwindow) SDL_SetHint(SDL_HINT_MAC_BACKGROUND_APP, "1");
     if(!SDL_Init(SDL_INIT_VIDEO)) fatal("Unable to initialize SDL");
     int sdlver = SDL_GetVersion();
     if(SDL_VERSION != sdlver)
