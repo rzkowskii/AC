@@ -133,7 +133,9 @@ jobs:
       - name: Build the client and the server
         run: |
           msbuild source\vcpp\assaultcube.sln /m /p:Configuration=Release /p:Platform=Win32 /p:PlatformToolset=v143
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           msbuild source\vcpp\assaultcube.sln /m /p:Configuration=Standalone /p:Platform=Win32 /p:PlatformToolset=v143
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: OpenAL (players get it from the installer; here the bundled OpenAL Soft, as bin_win32/readme_OpenAL.txt says)
         shell: bash
         run: cp bin_win32/openal32_RemoveThisPartToUseOpenAL-Soft.dll bin_win32/OpenAL32.dll
@@ -141,9 +143,10 @@ jobs:
         shell: pwsh
         run: |
           # (a Windows GUI program: piping its output makes PowerShell wait for it)
-          $v = & bin_win32\ac_client.exe --home="$env:RUNNER_TEMP\achome" --version | Out-String
+          $v = & .\bin_win32\ac_client.exe --home="$env:RUNNER_TEMP\achome" --version | Out-String
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Output "client version: $v"
+          if ($v -notmatch '(?m)^-?\d+\.\d+\r?$') { throw "Client did not report a version" }
           if (-not (Test-Path bin_win32\ac_server.exe)) { exit 1 }
       - name: Direct3D 12 timedemo (the same demo frames as the Linux job's, at 640x400)
         shell: bash

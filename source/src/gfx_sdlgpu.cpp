@@ -2043,9 +2043,9 @@ struct sdlgpubackend : gfxdevice
     {
         const uint minsize = 1u<<20;
         if(arenavbsize <= minsize && arenaibsize <= minsize && frameuploadsize <= minsize) { smallframes = 0; return; }
-        bool small = uint(vertexarena.length())*4 <= max(arenavbsize, minsize) && uint(indexarena.length()*sizeof(uint))*4 <= max(arenaibsize, minsize) &&
-                     lastuploadsize*4 <= max(frameuploadsize, minsize);
-        if(!small) { smallframes = 0; return; }
+        bool fitsquarter = uint(vertexarena.length())*4 <= max(arenavbsize, minsize) && uint(indexarena.length()*sizeof(uint))*4 <= max(arenaibsize, minsize) &&
+                           lastuploadsize*4 <= max(frameuploadsize, minsize);
+        if(!fitsquarter) { smallframes = 0; return; }
         if(++smallframes < 100) return;
         smallframes = 0;
         if(arenavbsize > minsize && arenavb) { SDL_ReleaseGPUBuffer(dev, arenavb); arenavb = NULL; arenavbsize = 0; }
