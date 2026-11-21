@@ -44,7 +44,7 @@ concurrency:
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     outputs:
       signing: ${{ steps.notarize.outputs.signing }}
     steps:
