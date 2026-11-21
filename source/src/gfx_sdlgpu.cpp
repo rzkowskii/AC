@@ -904,14 +904,15 @@ struct sdlgpubackend : gfxdevice
         SDL_GPUVertexBufferDescription vbd[NUMATTRS];
         SDL_GPUVertexAttribute va[NUMATTRS];
         int n = 0;
+        // SDL's Direct3D 12 backend indexes the buffer descriptions by binding slot.
         loopi(NUMATTRS) if(k.attrs[i])
         {
-            vbd[n].slot = i;
+            vbd[n].slot = n;
             vbd[n].pitch = k.pitch[i];
             vbd[n].input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
             vbd[n].instance_step_rate = 0;
             va[n].location = i;
-            va[n].buffer_slot = i;
+            va[n].buffer_slot = n;
             va[n].format = SDL_GPUVertexElementFormat(k.attrs[i]);
             va[n].offset = 0;
             n++;
@@ -2175,10 +2176,13 @@ struct sdlgpubackend : gfxdevice
                 SDL_SetGPUScissor(rp, &r);
                 memcpy(lastsc, d.scissor, sizeof(lastsc));
             }
-            loopj(NUMATTRS) if(d.vbsrc[j])
+            const pipelinekey &layout = pipelinekeys[d.pipeline];
+            uint slot = 0;
+            loopj(NUMATTRS) if(layout.attrs[j])
             {
                 SDL_GPUBufferBinding b = { drawbuffer(d.vbsrc[j], d.vbbuffer[j]), d.vboffset[j] };
-                if(b.buffer) SDL_BindGPUVertexBuffers(rp, j, &b, 1);
+                if(b.buffer) SDL_BindGPUVertexBuffers(rp, slot, &b, 1);
+                ++slot;
             }
             SDL_GPUBufferBinding ib = { d.ibsrc == SRC_ARENA ? arenaib : drawbuffer(SRC_BUFFER, d.ibbuffer), 0 };
             if(!ib.buffer) continue;

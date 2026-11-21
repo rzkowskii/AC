@@ -3,6 +3,9 @@
 #include "cube.h"
 #include <SDL3/SDL_main.h> // (only here) on Windows: SDL3's WinMain, which calls main() below; SDL2 included it with SDL.h
 
+// --hidden keeps automated runs unfocused and windowed while they render frames for screenshots.
+static bool hiddenwindow = false;
+
 void cleanup(char *msg)         // single program exit point;
 {
     if(clientlogfile) clientlogfile->fflush();
@@ -17,7 +20,8 @@ void cleanup(char *msg)         // single program exit point;
     if(msg)
     {
         #ifdef WIN32
-        MessageBox(NULL, msg, "AssaultCube fatal error", MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
+        if(!hiddenwindow) MessageBox(NULL, msg, "AssaultCube fatal error", MB_OK|MB_SYSTEMMODAL|MB_ICONERROR);
+        else fputs(msg, stderr);
         #else
         printf("%s", msg);
         #endif
@@ -153,12 +157,6 @@ static void applymacmousewarp()
 #ifdef AC_X11_GRAB
 VAR(sdl_xgrab_bug, 0, 0, 1);
 #endif
-
-// --hidden: for automated tests (timedemo comparisons, screenshots) on a computer someone is using: the window is
-// never shown or raised, never grabs the mouse, and on macOS the game runs as a background app (no Dock icon, never
-// takes the focus). The game still draws every frame (the Metal/Vulkan backend draws into its own targets, which
-// screenshots read). It runs windowed, at the background frame rate cap except during benchmarks.
-static bool hiddenwindow = false;
 
 void inputgrab(bool on, bool delay = false)
 {

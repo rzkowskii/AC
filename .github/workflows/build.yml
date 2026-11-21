@@ -158,7 +158,7 @@ jobs:
           cp source/dev_tools/timedemo_ac_desert.dmo "$home/demos/"
           printf "autodownload 0\naudio 0\nfullscreen 0\nscr_w 640\nscr_h 400\nvsync 0\nscreenshottype 2\n" > "$home/config/init.cfg"
           printf "onTimedemoEnd = [ quit ]\nmapstartonce = []\n" > "$home/config/autoexec.cfg"
-          timeout -k 10 600 bin_win32/ac_client.exe --gpu --home="$home" --init -t0 -w640 -h400 -v0 \
+          timeout -k 10 600 bin_win32/ac_client.exe --gpu --hidden --home="$home" --init -t0 -w640 -h400 -v0 \
             "-emaxfps 0; showstats 0; consize 0; hidehudmsgs 1; timedemo timedemo_ac_desert 30 10" | cat
           grep -E "renderer: SDL GPU|timedemo:" "$home/clientlog.txt"
           grep -q "renderer: SDL GPU (direct3d12)" "$home/clientlog.txt"
