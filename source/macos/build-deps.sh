@@ -31,7 +31,7 @@ for tool in cmake curl shasum; do
   command -v "$tool" >/dev/null || { echo "build-deps: '$tool' is required" >&2; exit 1; }
 done
 
-STAMP="$PREFIX/.built-$(printf '%s ' "${PACKAGES[@]}" "$ARCHS" "$MACOSX_DEPLOYMENT_TARGET" | shasum -a 256 | cut -c1-16)"
+STAMP="$PREFIX/.built-$( { printf '%s\n' "${PACKAGES[@]}" "$ARCHS" "$MACOSX_DEPLOYMENT_TARGET"; cat "$HERE/build-deps.sh"; } | shasum -a 256 | cut -c1-16)"
 if [ -f "$STAMP" ]; then
   echo "build-deps: up to date ($PREFIX)"
   exit 0
@@ -83,7 +83,9 @@ for p in "${PACKAGES[@]}"; do
   fetch "$name" "$url" "$sha"
 done
 
-cmakebuild SDL3-3.4.20 -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+# SDL uses find_library to include SDK frameworks such as GameController in its static link flags.
+cmakebuild SDL3-3.4.20 -DCMAKE_FIND_FRAMEWORK=LAST \
+  -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
 
 # (no SDL_image: the game decodes PNG and JPEG textures itself with stb_image, source/src/stbimage.cpp)
 

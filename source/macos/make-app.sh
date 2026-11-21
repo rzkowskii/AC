@@ -49,7 +49,7 @@ for arch in $ARCHLIST; do
     "$SRC/src" "$SRC/enet" "$SRC/include" "$tree/"
   if ! make -C "$tree/src" -j"$JOBS" PLATFORM=Darwin MACOS_ARCH="$arch" MACOS_DEPS="$DEPS" client server \
        > "$OUT/build-$arch.log" 2>&1; then
-    grep -E 'error|Error' "$OUT/build-$arch.log" | head -20
+    tail -80 "$OUT/build-$arch.log"
     echo "make-app: $arch build failed, see $OUT/build-$arch.log" >&2
     exit 1
   fi

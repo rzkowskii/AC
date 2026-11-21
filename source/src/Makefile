@@ -96,9 +96,9 @@ else ifeq ($(PLATFORM),Darwin)
 # For a distributable build, source/macos/make-app.sh sets MACOS_DEPS to the universal static libraries made by
 # source/macos/build-deps.sh, and MACOS_ARCH to the architecture being built (one build per architecture, then lipo).
 ifdef MACOS_DEPS
-# static SDL3, plus the system frameworks it needs (from its pkg-config file; pkg-config itself isn't required)
+# Static-only SDL3 lists its system frameworks in Libs. Also accept Libs.private from other SDL builds.
 SDL_CFLAGS= -I$(MACOS_DEPS)/include
-SDL_LIBS= $(MACOS_DEPS)/lib/libSDL3.a $(shell sed -n 's/^Libs.private: //p' $(MACOS_DEPS)/lib/pkgconfig/sdl3.pc)
+SDL_LIBS= $(MACOS_DEPS)/lib/libSDL3.a $(shell sed -n -e 's/^Libs:.* -lSDL3 *//p' -e 's/^Libs\.private: *//p' "$(MACOS_DEPS)/lib/pkgconfig/sdl3.pc")
 # OpenAL Soft (HRTF 3D audio) instead of Apple's deprecated OpenAL.framework; the app ships it in Contents/Frameworks
 MACOS_DEPS_INCLUDES= -I$(MACOS_DEPS)/include -DAC_OPENAL_SOFT
 MACOS_DEPS_LIBS= -L$(MACOS_DEPS)/lib
