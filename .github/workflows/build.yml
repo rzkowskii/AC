@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config clang \
             libopenal-dev libvorbis-dev zlib1g-dev libx11-dev libgl-dev \
-            libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxkbcommon-dev \
+            libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev \
             libwayland-dev wayland-protocols libegl-dev libdrm-dev libgbm-dev libvulkan-dev
       - name: SDL3 (not packaged in Ubuntu 24.04; the pinned release the macOS app uses)
         run: |
@@ -70,7 +70,7 @@ jobs:
           # exactly the same frames: every pixel must match. A client that hangs is stopped after 10 minutes.)
           source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -t 0 -m 100 -o "$RUNNER_TEMP/timedemo-gl" \
             source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gl"
-          source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -m 98 -o "$RUNNER_TEMP/timedemo-vulkan" \
+          SDL_GPU_DRIVER=vulkan source/dev_tools/timedemo-compare.sh -x -T 600 -w 640 -h 400 -s 30 -m 98 -o "$RUNNER_TEMP/timedemo-vulkan" \
             source/dev_tools/timedemo_ac_desert.dmo "build/ac_client --gl" "build/ac_client --gpu"
       - name: Upload the timedemo screenshots (the Windows job compares Direct3D 12 with them)
         if: always() && matrix.compiler == 'clang'
@@ -90,7 +90,7 @@ jobs:
       - name: AppImage (source/linux/make-appimage.sh, run on Mesa llvmpipe under Xvfb)
         if: matrix.compiler == 'clang'
         run: |
-          sudo apt-get install -y --no-install-recommends libxtst-dev libdecor-0-dev libdbus-1-dev libudev-dev \
+          sudo apt-get install -y --no-install-recommends libdecor-0-dev libdbus-1-dev libudev-dev \
             libibus-1.0-dev libpipewire-0.3-dev libpulse-dev libasound2-dev rsync zip file libgl1-mesa-dri
           source/linux/make-appimage.sh
           APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a -s "-screen 0 1280x800x24" timeout -k 10 120 source/linux/build/AssaultCube-*.AppImage \
@@ -160,7 +160,10 @@ jobs:
           grep -E "renderer: SDL GPU|timedemo:" "$home/clientlog.txt"
           grep -q "renderer: SDL GPU (direct3d12)" "$home/clientlog.txt"
           if grep -E "SDL GPU: .*(fail|no DXBC|no device)" "$home/clientlog.txt"; then exit 1; fi
-          ls "$home"/screenshots/timedemo_*.png
+          grep -Fq "timedemo: timedemo_ac_desert finished after 30.0 demo seconds" "$home/clientlog.txt"
+          for ms in 010000 020000; do
+            test -s "$home/screenshots/timedemo_timedemo_ac_desert_${ms}.png"
+          done
       - uses: actions/download-artifact@v4
         with:
           name: timedemo-linux
@@ -173,14 +176,11 @@ jobs:
         run: |
           cl -nologo -O2 -I source/src -I source/include source/dev_tools/imgcompare.c source/lib/SDL3.lib -Fe:imgcompare.exe
           export PATH="$PWD/bin_win32:$PATH"
-          n=0
-          for a in "$RUNNER_TEMP"/linux/timedemo-gl/a/screenshots/timedemo_*.png; do
-            f=$(basename "$a")
+          for ms in 010000 020000; do
+            f="timedemo_timedemo_ac_desert_${ms}.png"
             printf "%s: " "$f"
-            ./imgcompare.exe "$a" "$RUNNER_TEMP/d3d12/screenshots/$f" 8 90
-            n=$((n + 1))
+            ./imgcompare.exe "$RUNNER_TEMP/linux/timedemo-gl/a/screenshots/$f" "$RUNNER_TEMP/d3d12/screenshots/$f" 8 90
           done
-          [ $n -gt 0 ]
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -583,12 +583,11 @@ void renderdoc(int x, int y, int doch)
     if(docidentverbose >= 2)
     {
         doclines.add("\f4Cubescript statement broken into words:");
-        int n;
         loopi(MAXWORDS) if(w[i])
         {
-            if(i) formatstring(buf)("\fs\f4arg%d: \fr%n%s", i, &n, w[i]);
-            else formatstring(buf)("\fs\f4cmd: \fr%n%s", &n, w[i]);
-            doclines.add(heaplines.add(newstring(buf, n + wl[i])));
+            if(i) formatstring(buf)("\fs\f4arg%d: \fr%.*s", i, wl[i], w[i]);
+            else formatstring(buf)("\fs\f4cmd: \fr%.*s", wl[i], w[i]);
+            doclines.add(heaplines.add(newstring(buf)));
         }
     }
 

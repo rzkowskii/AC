@@ -1205,11 +1205,12 @@ static vec depthfrom;
 // next frame - exactly when shoot() needs it - instead of in the middle of the main pass. On tile-based GPUs (Apple
 // Silicon) reading back in the middle of the main pass splits it in two, which costs far more GPU time than drawing the
 // geometry a second time, and with a frame rate cap the GPU has finished the frame by the time the depth is read.
-// "depthpick 0" restores reading the main pass's depth in the middle of the frame.
+// On OpenGL, "depthpick 0" restores reading the main pass's depth in the middle of the frame.
+// SDL GPU always uses the pick pass, including for the edit cursor.
 VAR(depthpick, 0, 1, 1);
 static bool pickdrawn = false; // the pick pass ran this frame: readdepth() has nothing to do
 
-// "depthcheck 1" (debugging): also reads the main pass's depth in the middle of the frame (the old way) and compares the
+// On OpenGL, "depthcheck 1" also reads the main pass's depth in the middle of the frame and compares the
 // target that shoot() gets with the one the old code would have given it
 VAR(depthcheck, 0, 0, 1);
 static vec depthcheckpos;
@@ -1227,7 +1228,7 @@ void resolvedepth() // called at the start of a frame, before input and game upd
     }
     else if(!gfx->readpick(d)) return;
     depthtoworldpos(d, depthinvmvp, depthfrom, worldpos);
-    if(depthcheck)
+    if(depthcheck && gfx_legacygl())
     {
         float diff = worldpos.dist(depthcheckpos);
         depthchecked++;
@@ -1252,7 +1253,11 @@ static void cleanupdepthread()
 static void renderdepthpick(int w, int h)
 {
     pickdrawn = false;
-    if(!gfx->beginpick(scenedepthbits)) { depthpick = 0; return; }
+    if(!gfx->beginpick(scenedepthbits))
+    {
+        if(gfx_legacygl()) depthpick = 0;
+        return;
+    }
 
     // projection zoomed onto the crosshair pixel (w/2, h/2), the pixel the main pass's depth used to be read from:
     // that pixel's footprint is mapped onto the 1x1 viewport, so its centre is sampled at the same point of the view
@@ -1323,7 +1328,7 @@ void readdepth(int w, int h, vec &pos)
             if(gfx->readpick(d)) depthtoworldpos(d, depthinvmvp, depthfrom, pos);
             return;
         }
-        if(depthcheck)
+        if(depthcheck && gfx_legacygl())
         {
             float syncdepth, keepcursordepth = cursordepth;
             gfx->readdepth(w/2, h/2, syncdepth);
@@ -1425,10 +1430,8 @@ void gl_drawframe(int w, int h, float changelod, float curfps, int elapsed)
             (int)camera1->yaw, (int)camera1->pitch, dynfov(), fovy, w, h);
     rpmark(RP_WORLDGEN);
 
-    // crosshair target: drawn in its own small pass *before* the main pass starts (see renderdepthpick()). In edit mode
-    // the GL renderer reads the main pass's depth in the middle of the frame, which the GPU backend can't: it draws the
-    // pick pass then too, with what edit mode adds, and readdepth() waits for it
-    if((depthpick && hasFBO && !editmode) || (editmode && !gfx_legacygl())) renderdepthpick(w, h);
+    // SDL GPU uses its own pick pass. OpenGL can read depth from the main pass, as it does in edit mode.
+    if(!gfx_legacygl() || (depthpick && hasFBO && !editmode)) renderdepthpick(w, h);
     rpmark(RP_DEPTHPICK);
 
     if(effective_stencilshadow && hasstencil && stencilbits >= 8) gfx->clearstencil((hasSTS || hasST2) && !hasSTW ? 128 : 0);

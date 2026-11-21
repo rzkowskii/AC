@@ -1014,7 +1014,15 @@ static float rpcur[RP_NUM];
 // CPU time used by the calling thread: compared with wall time, it shows whether a phase is busy or waiting (on the GPU)
 static double threadcpums()
 {
-#ifdef CLOCK_THREAD_CPUTIME_ID
+#ifdef WIN32
+    FILETIME created, exited, kernel, user;
+    if(GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user))
+    {
+        uint64_t kernelticks = (uint64_t(kernel.dwHighDateTime) << 32) | kernel.dwLowDateTime;
+        uint64_t userticks = (uint64_t(user.dwHighDateTime) << 32) | user.dwLowDateTime;
+        return (kernelticks + userticks) / 10000.0; // FILETIME counts 100 ns intervals
+    }
+#elif defined(CLOCK_THREAD_CPUTIME_ID)
     struct timespec ts;
     if(!clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts)) return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 #endif
@@ -1891,10 +1899,6 @@ int main(int argc, char **argv)
     __try {
     #endif
     #endif
-    // VS2017+ does not support %n in format strings by default due to security concerns.
-    // However, currently we are making use of this functionality and therefore it is being enabled below.
-    // In the future we should get rid of this. See also https://docs.microsoft.com/en-us/previous-versions/hf4y5e3w(v=vs.140)?redirectedfrom=MSDN
-    _set_printf_count_output(1);
     #endif
 
     bool dedicated = false;
